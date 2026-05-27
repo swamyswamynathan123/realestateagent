@@ -110,6 +110,15 @@ class BaseRealEstateTool(ABC):
         api_key = os.environ.get("TAVILY_API_KEY", "")
         if not api_key:
             return ""
+
+        # ── Check search cache before hitting Tavily ──────────────────────────
+        _cache = self._get_search_cache()
+        if _cache is not None:
+            cached = _cache.lookup_search(query, include_domains)
+            if cached is not None:
+                return cached
+
+        # ── Live Tavily call ──────────────────────────────────────────────────
         try:
             from tavily import TavilyClient
             client = TavilyClient(api_key=api_key)
@@ -126,10 +135,28 @@ class BaseRealEstateTool(ABC):
                 content = (r.get("content") or "")[:max_chars_per_result].strip()
                 url = r.get("url", "")
                 lines.append(f"**{title}**\n{content}\n*{url}*")
-            return "\n\n".join(lines)
+            formatted = "\n\n".join(lines)
+
+            # Store result so the next identical query skips the HTTP call
+            if _cache is not None:
+                _cache.store_search(query, formatted, include_domains)
+
+            return formatted
         except Exception:
             logger.warning("Web search failed for query: %.60s", query, exc_info=True)
             return ""
+
+    @staticmethod
+    def _get_search_cache():
+        """Return the active SQLiteCache (if any) or None."""
+        try:
+            from langchain_core.globals import get_llm_cache
+            cache = get_llm_cache()
+            if hasattr(cache, "lookup_search"):
+                return cache
+        except Exception:
+            pass
+        return None
 
     def _error_result(self, address: str, error: str) -> dict:
         return {

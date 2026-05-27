@@ -59,45 +59,143 @@ class NeighborhoodTool(BaseRealEstateTool):
 
 MARKET_PROMPT = """You are a real estate market analyst.
 
+Live web-search data may be included in the user message under the heading
+"## 🌐 Live Market Data". When that section is present:
+- Extract real figures for median price, days on market, inventory, YoY change,
+  and list-to-sale ratio from the search results and use them in the report.
+- Cite the data source (e.g. "per Redfin, May 2025") inline where relevant.
+- Note the footer as "Live web data (Tavily)" instead of "AI estimate".
+
+When no live data is provided, rely on your training knowledge and note the
+footer as "AI estimate — verify with current MLS data".
+
+Produce the analysis in this exact markdown format:
+
 ## Market Conditions — {address}
 
 ### Market Classification
 **Market Type:** [Strong Seller's / Seller's / Balanced / Buyer's / Strong Buyer's]
 **Median Days on Market:** XX days
 **List-to-Sale Ratio:** XX.X%
-**Active Inventory:** [Low/Normal/High]
+**Active Inventory:** [Low / Normal / High] — X.X months of supply
+**Market Momentum:** [Heating / Stable / Cooling]
 
 ### Market Score Breakdown
 | Dimension | Score | Detail |
 |-----------|-------|--------|
-| Price Trends | XX/25 | [YoY appreciation %] |
-| Supply & Demand | XX/20 | [months of inventory] |
-| Economic Drivers | XX/20 | [job growth, major employers] |
-| Rental Market | XX/15 | [vacancy rate, rent growth] |
-| Growth Catalysts | XX/20 | [infrastructure, development] |
+| Price Trends | XX/25 | [YoY appreciation %, trajectory] |
+| Supply & Demand | XX/20 | [months of inventory, absorption rate] |
+| Economic Drivers | XX/20 | [job growth, major employers, GDP] |
+| Rental Market | XX/15 | [vacancy rate, rent growth YoY] |
+| Growth Catalysts | XX/20 | [infrastructure, migration, permits] |
 
 ### Price Trend (12 months)
 **Median Home Price:** $XXX,XXX
 **YoY Change:** +X.X%
-**Forecast (12mo):** +X.X% to +X.X%
+**Price per Sq Ft:** $XXX (YoY: +X.X%)
+**Forecast (12 mo):** +X.X% to +X.X%
+
+### Supply & Demand
+**Active Listings:** ~X,XXX
+**New Listings (mo):** ~XXX
+**Absorption Rate:** XX%
+**Months of Supply:** X.X
+
+### Economic Snapshot
+**Unemployment Rate:** X.X%
+**Top Employers:** [employer 1], [employer 2], [employer 3]
+**Population Trend:** [Growing / Stable / Declining] (+X.X% YoY)
 
 ### Key Market Drivers
-1. [driver 1]
+1. [driver 1 — be specific, cite data if available]
 2. [driver 2]
 3. [driver 3]
 
+### Risks & Headwinds
+1. [risk 1]
+2. [risk 2]
+
 **Score:** XX/100
-**Grade:** [A+ through F]"""
+**Grade:** [A+ through F]
+
+*Source: [Live web data (Tavily) | AI estimate — verify with current MLS data]*"""
+
+# Sources most likely to have current market statistics
+_MARKET_DOMAINS = [
+    "redfin.com", "zillow.com", "realtor.com",
+    "nar.realtor", "housingwire.com", "themortgagereports.com",
+]
+
+_MAX_MARKET_CONTEXT_CHARS = 5_000
 
 
 class MarketTool(BaseRealEstateTool):
     skill_name = "market"
     system_prompt = MARKET_PROMPT
 
+    # ── Web data gathering ────────────────────────────────────────────────────
+
+    def _fetch_market_data(self, address: str) -> str:
+        """
+        Run up to three Tavily searches for live market-condition data.
+
+        Returns a formatted markdown block, or '' if Tavily is unavailable.
+        """
+        sections: list[str] = []
+
+        # 1. Current market stats from real-estate portals
+        stats = self._web_search(
+            f"real estate market conditions {address} median home price days on market"
+            f" inventory 2024 2025",
+            max_results=5,
+            include_domains=_MARKET_DOMAINS,
+        )
+        if stats:
+            sections.append(f"### Market Statistics (Redfin / Zillow / NAR)\n{stats}")
+
+        # 2. Local price trends and YoY appreciation
+        trends = self._web_search(
+            f"home price trends {address} year over year appreciation forecast 2025",
+            max_results=4,
+        )
+        if trends:
+            sections.append(f"### Price Trends & Forecast\n{trends}")
+
+        # 3. Economic drivers — jobs, migration, development
+        economy = self._web_search(
+            f"{address} real estate market economic outlook job growth population"
+            f" housing demand 2025",
+            max_results=3,
+        )
+        if economy:
+            sections.append(f"### Economic & Demand Drivers\n{economy}")
+
+        if not sections:
+            return ""
+
+        body = "\n\n".join(sections)
+        if len(body) > _MAX_MARKET_CONTEXT_CHARS:
+            body = body[:_MAX_MARKET_CONTEXT_CHARS] + "\n\n*[web data truncated for length]*"
+
+        return (
+            "## 🌐 Live Market Data\n\n"
+            "Use the figures below to populate the market analysis. Extract median price, "
+            "days on market, YoY change, and inventory levels where available.\n\n"
+            + body
+        )
+
+    # ── Tool entry point ──────────────────────────────────────────────────────
+
     def run(self, address: str, **kwargs) -> dict:
         prompt = self.system_prompt.replace("{address}", address)
+
+        user_msg = f"Property address: {address}"
+        live_data = self._fetch_market_data(address)
+        if live_data:
+            user_msg += f"\n\n{live_data}"
+
         try:
-            output = self._call_llm(prompt, f"Property address: {address}")
+            output = self._call_llm(prompt, user_msg)
             return self._success_result(address, output)
         except Exception as e:
             return self._error_result(address, str(e))

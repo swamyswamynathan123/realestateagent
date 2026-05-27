@@ -98,12 +98,16 @@ def render_sidebar() -> None:
                 from langchain_core.globals import get_llm_cache
                 llm_cache = get_llm_cache()
                 if llm_cache is not None:
-                    n = llm_cache.size()
+                    n_llm = llm_cache.size()
+                    n_search = llm_cache.search_size() if hasattr(llm_cache, "search_size") else 0
                     col_cache, col_clear = st.columns([2, 1])
-                    col_cache.caption(f"💾 Cache: {n} entr{'y' if n == 1 else 'ies'}")
+                    parts = [f"{n_llm} LLM"]
+                    if n_search:
+                        parts.append(f"{n_search} search")
+                    col_cache.caption(f"💾 Cache: {', '.join(parts)}")
                     if col_clear.button("Clear", key="btn_clear_cache", use_container_width=True):
                         llm_cache.clear()
-                        st.toast("Cache cleared", icon="🗑️")
+                        st.toast("Cache cleared (LLM + search)", icon="🗑️")
                         st.rerun()
             except Exception:
                 pass

@@ -130,9 +130,11 @@ def test_comps_tool(mock_llm):
     assert result["status"] == "success"
 
 
-def test_comps_tool_no_tavily_key_no_web_data(mock_llm, monkeypatch):
-    """Without a Tavily key the tool should succeed using LLM knowledge only."""
+def test_comps_tool_no_tavily_key_no_web_data(mock_llm, monkeypatch, mocker):
+    """Without a Tavily key the tool succeeds using LLM knowledge only."""
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    # Also bypass the search cache so any pre-existing cached data doesn't leak in
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
     from tools.property_analysis import CompsTool
     result = CompsTool(llm=mock_llm).run("123 Main St, Austin TX")
     assert result["status"] == "success"
@@ -147,7 +149,6 @@ def test_comps_tool_no_tavily_key_no_web_data(mock_llm, monkeypatch):
 def test_comps_tool_injects_tavily_results(mock_llm, monkeypatch, mocker):
     """With a Tavily key the tool injects search results into the LLM prompt."""
     monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-key")
-    # Patch TavilyClient.search to return a canned result
     fake_results = {
         "results": [
             {
@@ -158,6 +159,8 @@ def test_comps_tool_injects_tavily_results(mock_llm, monkeypatch, mocker):
         ]
     }
     mocker.patch("tavily.TavilyClient.search", return_value=fake_results)
+    # Bypass the search cache so the mocked Tavily response is always used
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
     from tools.property_analysis import CompsTool
     result = CompsTool(llm=mock_llm).run("123 Main St, Austin TX")
     assert result["status"] == "success"
@@ -165,6 +168,47 @@ def test_comps_tool_injects_tavily_results(mock_llm, monkeypatch, mocker):
     user_msg = call_args[-1].content
     assert "🌐 Live Web Data" in user_msg
     assert "456 Oak Ave" in user_msg
+
+
+def test_search_cache_prevents_duplicate_tavily_calls(mock_llm, monkeypatch, mocker, tmp_path):
+    """Search cache hit: second run must not call Tavily again."""
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-key")
+    fake_results = {
+        "results": [
+            {
+                "title": "789 Pine St — Sold $380,000",
+                "content": "2 bed 1 bath 1,200 sq ft sold for $380,000",
+                "url": "https://www.redfin.com/fake",
+            }
+        ]
+    }
+    tavily_mock = mocker.patch("tavily.TavilyClient.search", return_value=fake_results)
+
+    # Use an isolated temp cache so test state doesn't bleed
+    from cache import SQLiteCache
+    test_cache = SQLiteCache(db_path=str(tmp_path / "test_search.db"))
+    mocker.patch(
+        "tools.base.BaseRealEstateTool._get_search_cache",
+        return_value=test_cache,
+    )
+
+    from tools.property_analysis import CompsTool
+    tool = CompsTool(llm=mock_llm)
+
+    # First run: Tavily is called (cache miss)
+    tool.run("789 Pine St, Denver CO")
+    calls_after_first = tavily_mock.call_count
+    assert calls_after_first > 0, "Tavily should have been called on the first run"
+
+    # Second run: search cache hits — Tavily call count must not increase
+    mock_llm.reset_mock()
+    tool.run("789 Pine St, Denver CO")
+    assert tavily_mock.call_count == calls_after_first, (
+        "Tavily was called again on the second run; search cache did not work"
+    )
+    # But the LLM IS called again (LLM cache is separate and keyed on prompt,
+    # which includes the Tavily text — stable now, so a real run would hit it too)
+    assert mock_llm.invoke.call_count > 0
 
 
 def test_rental_tool(mock_llm):
@@ -237,6 +281,64 @@ def test_market_tool(mock_llm):
     result = MarketTool(llm=mock_llm).run("123 Main St, Austin TX")
     assert result["skill"] == "market"
     assert result["status"] == "success"
+
+
+def test_market_tool_no_tavily_key(mock_llm, monkeypatch, mocker):
+    """Without a Tavily key the market tool uses LLM knowledge only."""
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
+    from tools.location_tools import MarketTool
+    result = MarketTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["status"] == "success"
+    user_msg = mock_llm.invoke.call_args[0][0][-1].content
+    assert "🌐 Live Market Data" not in user_msg
+
+
+def test_market_tool_injects_tavily_results(mock_llm, monkeypatch, mocker):
+    """With a Tavily key, live market stats are injected into the LLM prompt."""
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-key")
+    fake_results = {
+        "results": [
+            {
+                "title": "Austin TX Housing Market — May 2025",
+                "content": "Median home price $485,000, down 3% YoY. Avg 28 days on market."
+                           " 3.2 months of supply. List-to-sale ratio 97.5%.",
+                "url": "https://www.redfin.com/city/30818/TX/Austin/housing-market",
+            }
+        ]
+    }
+    mocker.patch("tavily.TavilyClient.search", return_value=fake_results)
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
+    from tools.location_tools import MarketTool
+    result = MarketTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["status"] == "success"
+    user_msg = mock_llm.invoke.call_args[0][0][-1].content
+    assert "🌐 Live Market Data" in user_msg
+    assert "485,000" in user_msg
+
+
+def test_market_tool_search_cache_prevents_duplicate_calls(mock_llm, monkeypatch, mocker, tmp_path):
+    """Second run with the same address must not call Tavily again."""
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-key")
+    fake_results = {
+        "results": [{"title": "Denver Market", "content": "Median $550k", "url": "http://x.com"}]
+    }
+    tavily_mock = mocker.patch("tavily.TavilyClient.search", return_value=fake_results)
+
+    from cache import SQLiteCache
+    test_cache = SQLiteCache(db_path=str(tmp_path / "market_test.db"))
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=test_cache)
+
+    from tools.location_tools import MarketTool
+    tool = MarketTool(llm=mock_llm)
+
+    tool.run("456 Elm St, Denver CO")
+    calls_after_first = tavily_mock.call_count
+    assert calls_after_first > 0
+
+    mock_llm.reset_mock()
+    tool.run("456 Elm St, Denver CO")
+    assert tavily_mock.call_count == calls_after_first, "Tavily called again despite search cache"
 
 
 def test_listing_tool(mock_llm):
