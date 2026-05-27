@@ -54,7 +54,9 @@ def _ensure_table(db: str = _DEFAULT_DB) -> None:
                 timestamp       TEXT    NOT NULL,
                 report_markdown TEXT    NOT NULL,
                 tool_results    TEXT    NOT NULL DEFAULT '{}',
-                scores          TEXT    NOT NULL DEFAULT '{}'
+                scores          TEXT    NOT NULL DEFAULT '{}',
+                purchase_price  INTEGER NOT NULL DEFAULT 0,
+                hoa_fees        INTEGER NOT NULL DEFAULT 0
             )
         """)
         # Index for fast recency queries
@@ -62,12 +64,23 @@ def _ensure_table(db: str = _DEFAULT_DB) -> None:
             CREATE INDEX IF NOT EXISTS idx_rh_timestamp
             ON report_history (timestamp DESC)
         """)
+        # Migrate existing tables that predate purchase_price / hoa_fees columns
+        for col, defn in [
+            ("purchase_price", "INTEGER NOT NULL DEFAULT 0"),
+            ("hoa_fees",       "INTEGER NOT NULL DEFAULT 0"),
+        ]:
+            try:
+                con.execute(f"ALTER TABLE report_history ADD COLUMN {col} {defn}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
 
 def save_report(
     address: str,
     report_markdown: str,
     tool_results: dict[str, str],
+    purchase_price: int = 0,
+    hoa_fees: int = 0,
     db: str = _DEFAULT_DB,
 ) -> int:
     """Persist a completed analysis.  Returns the new row id."""
@@ -88,8 +101,9 @@ def save_report(
         cur = con.execute(
             """
             INSERT INTO report_history
-                (address, timestamp, report_markdown, tool_results, scores)
-            VALUES (?, ?, ?, ?, ?)
+                (address, timestamp, report_markdown, tool_results, scores,
+                 purchase_price, hoa_fees)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 address,
@@ -97,6 +111,8 @@ def save_report(
                 report_markdown,
                 json.dumps(tool_results),
                 json.dumps(scores),
+                purchase_price,
+                hoa_fees,
             ),
         )
         return cur.lastrowid  # type: ignore[return-value]
@@ -134,7 +150,8 @@ def load_report(report_id: int, db: str = _DEFAULT_DB) -> Optional[dict]:
     with _conn(db) as con:
         row = con.execute(
             """
-            SELECT id, address, timestamp, report_markdown, tool_results, scores
+            SELECT id, address, timestamp, report_markdown, tool_results, scores,
+                   purchase_price, hoa_fees
             FROM report_history
             WHERE id = ?
             """,
@@ -149,6 +166,8 @@ def load_report(report_id: int, db: str = _DEFAULT_DB) -> Optional[dict]:
         "report_markdown": row[3],
         "tool_results": json.loads(row[4]),
         "scores": json.loads(row[5]),
+        "purchase_price": row[6],
+        "hoa_fees": row[7],
     }
 
 

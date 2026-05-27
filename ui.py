@@ -32,19 +32,155 @@ def configure_page() -> None:
         layout="wide",
         initial_sidebar_state="expanded",
     )
-    st.markdown("""
-    <style>
-    [data-testid="stSidebar"] { background-color: #f0f4f8; }
-    .stProgress > div > div { background-color: #2d6a9f !important; }
-    div[data-testid="metric-container"] {
-        background: #f8f9fa;
-        border-radius: 8px;
-        padding: 12px;
-        border: 1px solid #e0e0e0;
-    }
-    .quick-link-btn { margin: 2px 0; }
-    </style>
-    """, unsafe_allow_html=True)
+
+
+_LIGHT_CSS = """
+<style>
+[data-testid="stSidebar"] { background-color: #f0f4f8; }
+.stProgress > div > div { background-color: #2d6a9f !important; }
+div[data-testid="metric-container"] {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 12px;
+    border: 1px solid #e0e0e0;
+}
+.quick-link-btn { margin: 2px 0; }
+</style>
+"""
+
+_DARK_CSS = """
+<style>
+/* ── Main surfaces ───────────────────────────────── */
+.stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="block-container"] {
+    background-color: #0e1117 !important;
+    color: #e8eaed !important;
+}
+[data-testid="stHeader"] {
+    background-color: #0e1117 !important;
+}
+
+/* ── Sidebar ─────────────────────────────────────── */
+[data-testid="stSidebar"] {
+    background-color: #1a1d27 !important;
+    border-right: 1px solid #2d3142;
+}
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] div {
+    color: #e8eaed !important;
+}
+
+/* ── Metric cards ────────────────────────────────── */
+div[data-testid="metric-container"] {
+    background: #1e2130 !important;
+    border-radius: 8px;
+    padding: 12px;
+    border: 1px solid #2d3142 !important;
+}
+div[data-testid="metric-container"] * {
+    color: #e8eaed !important;
+}
+
+/* ── Inputs ──────────────────────────────────────── */
+.stTextInput input,
+.stNumberInput input,
+textarea {
+    background-color: #1e2130 !important;
+    color: #e8eaed !important;
+    border-color: #2d3142 !important;
+}
+.stTextInput label,
+.stNumberInput label {
+    color: #e8eaed !important;
+}
+
+/* ── Tabs ────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    background-color: #1a1d27 !important;
+}
+.stTabs [data-baseweb="tab"] {
+    color: #9aa0ac !important;
+}
+.stTabs [aria-selected="true"] {
+    color: #e8eaed !important;
+    border-bottom-color: #4a9eff !important;
+}
+
+/* ── Expanders ───────────────────────────────────── */
+[data-testid="stExpander"] {
+    background-color: #1e2130 !important;
+    border-color: #2d3142 !important;
+}
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] p {
+    color: #e8eaed !important;
+}
+
+/* ── Buttons ─────────────────────────────────────── */
+.stButton > button {
+    background-color: #1e2130 !important;
+    border-color: #2d3142 !important;
+    color: #e8eaed !important;
+}
+.stButton > button[kind="primary"] {
+    background-color: #1a3c5e !important;
+    border-color: #2d6a9f !important;
+    color: #ffffff !important;
+}
+
+/* ── Checkboxes / toggle ─────────────────────────── */
+.stCheckbox label,
+.stToggle label {
+    color: #e8eaed !important;
+}
+
+/* ── Markdown & general text ─────────────────────── */
+.stMarkdown, .stMarkdown p,
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+.stMarkdown li, .stMarkdown td, .stMarkdown th {
+    color: #e8eaed !important;
+}
+.stCaption, [data-testid="stCaptionContainer"] {
+    color: #9aa0ac !important;
+}
+
+/* ── Dividers ────────────────────────────────────── */
+hr { border-color: #2d3142 !important; }
+
+/* ── Info / warning / error boxes ───────────────── */
+[data-testid="stAlert"] {
+    background-color: #1e2130 !important;
+}
+
+/* ── Progress bar ────────────────────────────────── */
+.stProgress > div > div { background-color: #4a9eff !important; }
+
+/* ── Chat messages ───────────────────────────────── */
+[data-testid="stChatMessage"] {
+    background-color: #1e2130 !important;
+    border-color: #2d3142 !important;
+}
+
+/* ── Download / link buttons ─────────────────────── */
+.stDownloadButton > button,
+.stLinkButton > a {
+    background-color: #1e2130 !important;
+    border-color: #2d3142 !important;
+    color: #e8eaed !important;
+}
+
+.quick-link-btn { margin: 2px 0; }
+</style>
+"""
+
+
+def apply_theme() -> None:
+    """Inject light or dark CSS based on session state. Call after init_session()."""
+    dark = st.session_state.get("dark_mode", False)
+    st.markdown(_DARK_CSS if dark else _LIGHT_CSS, unsafe_allow_html=True)
 
 
 # ── Session state ──────────────────────────────────────────────────────────────
@@ -72,6 +208,8 @@ def init_session() -> None:
         "chat_messages": [],     # list of {"role": "user"|"assistant", "content": str}
         # Report history — list of recent reports loaded from DB
         "history_loaded": False,
+        # Theme
+        "dark_mode": False,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -293,6 +431,18 @@ def render_sidebar() -> None:
         # ── Report History ─────────────────────────────────────────────────────
         _render_history_sidebar()
 
+        st.divider()
+
+        # ── Theme toggle ───────────────────────────────────────────────────────
+        dark = st.toggle(
+            "🌙 Dark Mode",
+            value=st.session_state.dark_mode,
+            key="toggle_dark_mode",
+        )
+        if dark != st.session_state.dark_mode:
+            st.session_state.dark_mode = dark
+            st.rerun()
+
 
 def _render_history_sidebar() -> None:
     """Show recent analyses in the sidebar with load/delete buttons."""
@@ -331,6 +481,14 @@ def _render_history_sidebar() -> None:
                     full = load_report(r["id"])
                     if full:
                         st.session_state.address = full["address"]
+                        # Also update widget keys so the input fields re-populate
+                        st.session_state.input_address = full["address"]
+                        pp = full.get("purchase_price") or 0
+                        hoa = full.get("hoa_fees") or 0
+                        st.session_state.purchase_price = pp
+                        st.session_state.input_purchase_price = pp
+                        st.session_state.hoa_fees = hoa
+                        st.session_state.input_hoa_fees = hoa
                         st.session_state.report_markdown = full["report_markdown"]
                         st.session_state.tool_results = full["tool_results"]
                         st.session_state.errors = {}
@@ -442,7 +600,13 @@ def _save_to_history(address: str) -> None:
         report_md = st.session_state.get("report_markdown") or ""
         tool_results = st.session_state.get("tool_results") or {}
         if report_md and tool_results:
-            save_report(address, report_md, tool_results)
+            save_report(
+                address,
+                report_md,
+                tool_results,
+                purchase_price=st.session_state.get("purchase_price") or 0,
+                hoa_fees=st.session_state.get("hoa_fees") or 0,
+            )
     except Exception:
         logger.debug("History save failed (non-fatal)", exc_info=True)
 
@@ -802,6 +966,7 @@ def main() -> None:
     """Main Streamlit app entry point."""
     configure_page()
     init_session()
+    apply_theme()
 
     # Header
     st.title("🏡 Real Estate Agent")
