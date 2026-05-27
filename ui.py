@@ -672,15 +672,43 @@ def render_map(address: str) -> None:
 
 # ── Property Quick Links ───────────────────────────────────────────────────────
 
+def _realtor_slug(address: str) -> str:
+    """Build a Realtor.com path slug from a US address string.
+
+    '123 Main St, Austin, TX 78701' → '123-Main-St_Austin_TX'
+
+    Realtor.com URL pattern:
+      /realestateandforsale/{street-hyphenated}_{city}_{state}/
+    """
+    import re
+    # Drop ZIP code at end
+    addr = re.sub(r",?\s*\d{5}(-\d{4})?\s*$", "", address).strip()
+    # Split on commas, strip each part, replace internal spaces with hyphens
+    parts = [p.strip().replace(" ", "-") for p in addr.split(",") if p.strip()]
+    return "_".join(parts)
+
+
 def render_quick_links(address: str) -> None:
     """Render external property link buttons (Zillow, Redfin, Realtor, Google Maps)."""
-    from urllib.parse import quote_plus
-    enc = quote_plus(address)
+    from urllib.parse import quote
 
-    zillow_url   = f"https://www.zillow.com/homes/{enc}_rb/"
-    redfin_url   = f"https://www.redfin.com/search#location={enc}"
-    realtor_url  = f"https://www.realtor.com/realestateandforsale/{enc}"
-    maps_url     = f"https://www.google.com/maps/search/{enc}"
+    # Use %20 (not +) for spaces:
+    #  • Path segments (Zillow, Realtor, Maps) require %20
+    #  • Redfin ?location= query param also handles %20 correctly
+    enc = quote(address, safe="")
+
+    # Zillow: path-based search — %20 spaces work fine
+    zillow_url  = f"https://www.zillow.com/homes/{enc}/"
+
+    # Redfin: query param (?location=) is more reliable than hash fragment (#location=)
+    # and %20 is correctly decoded by the browser before Redfin's JS reads it
+    redfin_url  = f"https://www.redfin.com/search?location={enc}"
+
+    # Realtor.com: expects slug format  123-Main-St_Austin_TX  (hyphens + underscores)
+    # quote_plus / percent-encoding both 404 on their router
+    realtor_url = f"https://www.realtor.com/realestateandforsale/{_realtor_slug(address)}/"
+
+    maps_url    = f"https://www.google.com/maps/search/{enc}"
 
     with st.expander("🔗 Property Quick Links", expanded=False):
         c1, c2, c3, c4 = st.columns(4)
