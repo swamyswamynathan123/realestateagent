@@ -31,12 +31,22 @@ class BaseRealEstateTool(ABC):
     system_prompt: str = ""
 
     def __init__(self, llm: Optional[ChatOpenAI] = None) -> None:
-        self.llm = llm or ChatOpenAI(
-            model=config.OPENAI_MODEL,
-            api_key=config.OPENAI_API_KEY,
-            max_tokens=config.OPENAI_MAX_TOKENS,
-            temperature=config.OPENAI_TEMPERATURE,
-        )
+        if llm is not None:
+            self.llm = llm
+        else:
+            # Only pass api_key when it is non-empty.  Passing api_key="" to the
+            # newer openai SDK overrides the OPENAI_API_KEY env-var lookup and
+            # raises "Missing credentials", breaking the UI-entered-key workflow.
+            # When omitted, ChatOpenAI reads OPENAI_API_KEY from the environment
+            # (set by run_analysis() before any tool is instantiated).
+            init_kwargs: dict = {
+                "model": config.OPENAI_MODEL,
+                "max_tokens": config.OPENAI_MAX_TOKENS,
+                "temperature": config.OPENAI_TEMPERATURE,
+            }
+            if config.OPENAI_API_KEY:
+                init_kwargs["api_key"] = config.OPENAI_API_KEY
+            self.llm = ChatOpenAI(**init_kwargs)
 
     @abstractmethod
     def run(self, address: str, **kwargs) -> dict:
