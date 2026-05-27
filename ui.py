@@ -200,6 +200,11 @@ def init_session() -> None:
         "selected_skills": list(ALL_SKILLS),
         "purchase_price": 0,
         "hoa_fees": 0,
+        # Widget-key defaults — must be initialised here so the widgets have a
+        # single source of truth (session state only, no value= conflict).
+        "input_address": "",
+        "input_purchase_price": 0,
+        "input_hoa_fees": 0,
         # Map state — reset whenever a new address is analyzed.
         # None = not attempted; False = attempted but failed; (lat,lon) = success
         "map_coords": None,
@@ -220,6 +225,30 @@ def init_session() -> None:
 
 def render_sidebar() -> None:
     """Render sidebar with API keys, address input, skill toggles, generate button."""
+    # ── Apply pending history load BEFORE any widget is instantiated ───────────
+    # Streamlit forbids setting a widget's session-state key after that widget
+    # has been rendered in the current run.  The load button fires at the bottom
+    # of the sidebar (after input_address is already on screen), so we stage the
+    # data in pending_load, rerun, and apply it here at the very top of the next
+    # run before any widgets exist.
+    if "pending_load" in st.session_state:
+        load = st.session_state.pending_load
+        st.session_state.address               = load["address"]
+        st.session_state.input_address         = load["address"]
+        pp  = load.get("purchase_price") or 0
+        hoa = load.get("hoa_fees") or 0
+        st.session_state.purchase_price        = pp
+        st.session_state.input_purchase_price  = pp
+        st.session_state.hoa_fees              = hoa
+        st.session_state.input_hoa_fees        = hoa
+        st.session_state.report_markdown       = load.get("report_markdown")
+        st.session_state.tool_results          = load.get("tool_results", {})
+        st.session_state.errors                = {}
+        st.session_state.chat_messages         = []
+        st.session_state.map_coords            = None
+        st.session_state.map_address           = ""
+        del st.session_state["pending_load"]
+
     with st.sidebar:
         st.title("🏡 Real Estate Agent")
         st.caption("Powered by LangGraph + OpenAI")
@@ -321,43 +350,40 @@ def render_sidebar() -> None:
 
         st.divider()
 
-        # Address
-        address = st.text_input(
+        # Address — no value= param; session state key is the single source of truth
+        st.text_input(
             "🏠 Property Address",
-            value=st.session_state.address,
             placeholder="123 Main St, Austin, TX 78701",
             help="Enter a full US property address including city and state.",
             key="input_address",
         )
-        st.session_state.address = address
+        st.session_state.address = st.session_state.input_address
 
         # Optional property details
         st.caption("*(Optional)* Known property details improve accuracy:")
         col_price, col_hoa = st.columns(2)
         with col_price:
-            purchase_price = st.number_input(
+            st.number_input(
                 "Sale Price ($)",
                 min_value=0,
                 max_value=100_000_000,
-                value=st.session_state.purchase_price,
                 step=1000,
                 help="Enter the listed or agreed sale price. Leave 0 to let AI estimate.",
                 key="input_purchase_price",
                 format="%d",
             )
-            st.session_state.purchase_price = purchase_price
+            st.session_state.purchase_price = st.session_state.input_purchase_price
         with col_hoa:
-            hoa_fees = st.number_input(
+            st.number_input(
                 "HOA Fees ($/mo)",
                 min_value=0,
                 max_value=10_000,
-                value=st.session_state.hoa_fees,
                 step=25,
                 help="Monthly HOA fees. Leave 0 if none or unknown.",
                 key="input_hoa_fees",
                 format="%d",
             )
-            st.session_state.hoa_fees = hoa_fees
+            st.session_state.hoa_fees = st.session_state.input_hoa_fees
 
         st.divider()
 
@@ -480,21 +506,17 @@ def _render_history_sidebar() -> None:
                 ):
                     full = load_report(r["id"])
                     if full:
-                        st.session_state.address = full["address"]
-                        # Also update widget keys so the input fields re-populate
-                        st.session_state.input_address = full["address"]
-                        pp = full.get("purchase_price") or 0
-                        hoa = full.get("hoa_fees") or 0
-                        st.session_state.purchase_price = pp
-                        st.session_state.input_purchase_price = pp
-                        st.session_state.hoa_fees = hoa
-                        st.session_state.input_hoa_fees = hoa
-                        st.session_state.report_markdown = full["report_markdown"]
-                        st.session_state.tool_results = full["tool_results"]
-                        st.session_state.errors = {}
-                        st.session_state.chat_messages = []
-                        st.session_state.map_coords = None
-                        st.session_state.map_address = ""
+                        # Stage data in pending_load — widget keys (input_address
+                        # etc.) cannot be set after their widgets are rendered in
+                        # the same run.  render_sidebar() drains this at the top
+                        # of the NEXT run before any widget is instantiated.
+                        st.session_state.pending_load = {
+                            "address":        full["address"],
+                            "purchase_price": full.get("purchase_price") or 0,
+                            "hoa_fees":       full.get("hoa_fees") or 0,
+                            "report_markdown": full["report_markdown"],
+                            "tool_results":   full["tool_results"],
+                        }
                         st.rerun()
             with col_del:
                 if st.button("🗑", key=f"hist_del_{r['id']}", help="Delete this report"):
