@@ -57,9 +57,10 @@ def init_session() -> None:
         "selected_skills": list(ALL_SKILLS),
         "purchase_price": 0,
         "hoa_fees": 0,
-        # Map state — reset whenever a new address is analyzed
-        "map_coords": None,      # (lat, lon) tuple or None
-        "map_address": "",       # address for which map_coords was geocoded
+        # Map state — reset whenever a new address is analyzed.
+        # None = not attempted; False = attempted but failed; (lat,lon) = success
+        "map_coords": None,
+        "map_address": "",
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -308,36 +309,44 @@ def render_map(address: str) -> None:
 
     Geocoding is performed once per address and cached in session state so
     repeated Streamlit reruns don't fire extra HTTP requests.
+
+    Session-state keys:
+      map_coords  — (lat, lon) tuple on success, False when geocoding was
+                    attempted and failed (avoids retrying on every rerun),
+                    None when not yet attempted.
+      map_address — address string for which map_coords was last computed.
     """
     import pandas as pd
 
-    # Use cached coords when the address hasn't changed
-    if (
-        st.session_state.get("map_coords") is None
-        or st.session_state.get("map_address") != address
-    ):
-        with st.spinner("📍 Locating property on map…"):
-            coords = geocode_address(address)
-        st.session_state.map_coords = coords
-        st.session_state.map_address = address
+    cached_coords = st.session_state.get("map_coords")   # None / False / (lat,lon)
+    cached_addr   = st.session_state.get("map_address", "")
 
-    coords = st.session_state.map_coords
+    # Re-geocode only when the address has changed or no attempt has been made yet
+    if cached_addr != address or cached_coords is None:
+        with st.spinner("📍 Locating property on map…"):
+            result = geocode_address(address)
+        # Store False (not None) so we know a failed lookup was already attempted
+        st.session_state.map_coords  = result if result is not None else False
+        st.session_state.map_address = address
+        cached_coords = st.session_state.map_coords
 
     with st.expander("🗺️ Location Map", expanded=True):
-        if coords is None:
+        if not cached_coords:
             st.info(
-                "Map unavailable — address could not be geocoded. "
-                "Try including city, state, and ZIP code."
+                "Map unavailable — the address could not be located. "
+                "This can happen with brand-new developments or very rural "
+                "properties not yet in OpenStreetMap. "
+                "The analysis above is unaffected."
             )
             return
 
-        lat, lon = coords
+        lat, lon = cached_coords
         df = pd.DataFrame({"lat": [lat], "lon": [lon]})
 
         st.map(df, zoom=14, use_container_width=True)
         st.caption(
             f"📍 **{address}** &nbsp;·&nbsp; "
-            f"{lat:.5f}° N, {lon:.5f}° W &nbsp;·&nbsp; "
+            f"{lat:.5f}°, {lon:.5f}° &nbsp;·&nbsp; "
             "Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors"
         )
 

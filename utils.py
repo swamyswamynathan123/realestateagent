@@ -14,33 +14,97 @@ logger = logging.getLogger(__name__)
 
 # ── Geocoding ──────────────────────────────────────────────────────────────────
 
-def geocode_address(address: str) -> Optional[tuple[float, float]]:
-    """
-    Convert a US property address to (latitude, longitude) using the free
-    Nominatim / OpenStreetMap geocoding API.  No API key required.
+_GEO_HEADERS = {"User-Agent": "RealEstateAgent/1.0 (educational)"}
+_GEO_TIMEOUT = 6
 
-    Returns None if geocoding fails or no result is found.
-    """
+
+def _nominatim(query: str) -> Optional[tuple[float, float]]:
+    """Try Nominatim (OpenStreetMap) for *query*.  Returns (lat, lon) or None."""
     try:
         import requests
-        resp = requests.get(
+        r = requests.get(
             "https://nominatim.openstreetmap.org/search",
-            params={
-                "q": address,
-                "format": "json",
-                "limit": 1,
-                "countrycodes": "us",
-                "addressdetails": "0",
-            },
-            headers={"User-Agent": "RealEstateAgent/1.0 (educational)"},
-            timeout=6,
+            params={"q": query, "format": "json", "limit": 1, "countrycodes": "us"},
+            headers=_GEO_HEADERS,
+            timeout=_GEO_TIMEOUT,
         )
-        resp.raise_for_status()
-        results = resp.json()
-        if results:
-            return float(results[0]["lat"]), float(results[0]["lon"])
+        r.raise_for_status()
+        data = r.json()
+        if data:
+            return float(data[0]["lat"]), float(data[0]["lon"])
     except Exception:
-        logger.warning("Geocoding failed for: %.80s", address, exc_info=True)
+        logger.debug("Nominatim failed for: %.60s", query, exc_info=True)
+    return None
+
+
+def _photon(query: str) -> Optional[tuple[float, float]]:
+    """Try Photon (komoot.io, OSM-based) as a secondary geocoder."""
+    try:
+        import requests
+        r = requests.get(
+            "https://photon.komoot.io/api/",
+            params={"q": query, "limit": 1, "lang": "en"},
+            headers=_GEO_HEADERS,
+            timeout=_GEO_TIMEOUT,
+        )
+        r.raise_for_status()
+        features = r.json().get("features", [])
+        if features:
+            lon, lat = features[0]["geometry"]["coordinates"]
+            return float(lat), float(lon)
+    except Exception:
+        logger.debug("Photon failed for: %.60s", query, exc_info=True)
+    return None
+
+
+def _broad_query(address: str) -> str:
+    """
+    Strip the street number/name and return the city-level part of the address.
+
+    "123 Main St, Austin, TX 78701" → "Austin, TX 78701"
+    Falls back to the original address if no comma is found.
+    """
+    parts = [p.strip() for p in address.split(",")]
+    # Drop the first segment (street) if there are 3+ parts
+    if len(parts) >= 3:
+        return ", ".join(parts[1:])
+    if len(parts) == 2:
+        return parts[1]
+    return address
+
+
+def geocode_address(address: str) -> Optional[tuple[float, float]]:
+    """
+    Convert a US property address to (latitude, longitude).  No API key required.
+
+    Uses a three-step chain to maximise hit rate:
+      1. Nominatim (OSM) — best for exact matches in OSM database
+      2. Photon (komoot) — different OSM index, better for partial addresses
+      3. City/state/zip fallback — shows the general area when the exact
+         street address isn't in either database (e.g. new construction,
+         rural properties, fictional addresses)
+
+    Returns None only if all three strategies fail.
+    """
+    # 1. Exact address via Nominatim
+    result = _nominatim(address)
+    if result:
+        return result
+
+    # 2. Exact address via Photon
+    result = _photon(address)
+    if result:
+        return result
+
+    # 3. City-level fallback (drops street number/name)
+    broad = _broad_query(address)
+    if broad != address:
+        result = _nominatim(broad) or _photon(broad)
+        if result:
+            logger.info("Geocoded at city level (street not found): %s → %s", address, broad)
+            return result
+
+    logger.warning("All geocoding strategies failed for: %.80s", address)
     return None
 
 # ── Section ordering for final report ──────────────────────────────────────────
