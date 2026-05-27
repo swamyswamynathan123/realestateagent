@@ -675,37 +675,54 @@ def render_map(address: str) -> None:
 def _realtor_slug(address: str) -> str:
     """Build a Realtor.com path slug from a US address string.
 
-    '123 Main St, Austin, TX 78701' → '123-Main-St_Austin_TX'
+    '123 Main St #C40, Austin, TX 78701' → '123-Main-St_Austin_TX'
 
-    Realtor.com URL pattern:
-      /realestateandforsale/{street-hyphenated}_{city}_{state}/
+    Rules:
+      - Strip ZIP code
+      - Strip unit designators (#N, Apt N, Unit N, Ste N, Suite N) — Realtor.com
+        never includes them in the URL path; omitting them gives broader results
+      - Replace spaces with hyphens within each comma-separated part
+      - Join parts with underscores
     """
     import re
-    # Drop ZIP code at end
+    # Drop ZIP code
     addr = re.sub(r",?\s*\d{5}(-\d{4})?\s*$", "", address).strip()
-    # Split on commas, strip each part, replace internal spaces with hyphens
-    parts = [p.strip().replace(" ", "-") for p in addr.split(",") if p.strip()]
-    return "_".join(parts)
+    # Split on commas
+    parts = [p.strip() for p in addr.split(",") if p.strip()]
+    clean = []
+    for i, part in enumerate(parts):
+        if i == 0:
+            # Street part — strip unit designators before hyphenating
+            part = re.sub(
+                r"\s+(#\S+|[Aa]pt\.?\s*\S+|[Uu]nit\s+\S+|[Ss]te\.?\s*\S+|[Ss]uite\s+\S+)",
+                "",
+                part,
+            ).strip()
+        clean.append(part.replace(" ", "-"))
+    return "_".join(clean)
 
 
 def render_quick_links(address: str) -> None:
     """Render external property link buttons (Zillow, Redfin, Realtor, Google Maps)."""
     from urllib.parse import quote
 
-    # Use %20 (not +) for spaces:
-    #  • Path segments (Zillow, Realtor, Maps) require %20
-    #  • Redfin ?location= query param also handles %20 correctly
+    # quote(safe="") encodes everything including # → %23 and space → %20.
+    # %20 is correct for both URL path segments and query-param values.
+    # Never use quote_plus here: '+' is only valid in application/x-www-form-urlencoded,
+    # not in URL paths or hash fragments.
     enc = quote(address, safe="")
 
-    # Zillow: path-based search — %20 spaces work fine
+    # Zillow: path search — works with %20-encoded address
     zillow_url  = f"https://www.zillow.com/homes/{enc}/"
 
-    # Redfin: query param (?location=) is more reliable than hash fragment (#location=)
-    # and %20 is correctly decoded by the browser before Redfin's JS reads it
+    # Redfin: ?location= query param with %20 encoding.
+    # The hash-fragment form (#location=) is unreliable because browsers pass
+    # fragment content to JS un-decoded, and + is NOT treated as space there.
     redfin_url  = f"https://www.redfin.com/search?location={enc}"
 
-    # Realtor.com: expects slug format  123-Main-St_Austin_TX  (hyphens + underscores)
-    # quote_plus / percent-encoding both 404 on their router
+    # Realtor.com: slug router — hyphens within parts, underscores between parts.
+    # Unit numbers (#C40, Apt 3, etc.) are stripped because their router ignores
+    # them and a bare # in the path would be mis-parsed as a URL fragment.
     realtor_url = f"https://www.realtor.com/realestateandforsale/{_realtor_slug(address)}/"
 
     maps_url    = f"https://www.google.com/maps/search/{enc}"
