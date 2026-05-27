@@ -11,6 +11,38 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+
+# ── Geocoding ──────────────────────────────────────────────────────────────────
+
+def geocode_address(address: str) -> Optional[tuple[float, float]]:
+    """
+    Convert a US property address to (latitude, longitude) using the free
+    Nominatim / OpenStreetMap geocoding API.  No API key required.
+
+    Returns None if geocoding fails or no result is found.
+    """
+    try:
+        import requests
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={
+                "q": address,
+                "format": "json",
+                "limit": 1,
+                "countrycodes": "us",
+                "addressdetails": "0",
+            },
+            headers={"User-Agent": "RealEstateAgent/1.0 (educational)"},
+            timeout=6,
+        )
+        resp.raise_for_status()
+        results = resp.json()
+        if results:
+            return float(results[0]["lat"]), float(results[0]["lon"])
+    except Exception:
+        logger.warning("Geocoding failed for: %.80s", address, exc_info=True)
+    return None
+
 # ── Section ordering for final report ──────────────────────────────────────────
 
 SECTION_ORDER = [

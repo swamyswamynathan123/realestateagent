@@ -12,6 +12,7 @@ import streamlit as st
 
 import config
 from config import ALL_SKILLS, PARALLEL_SKILLS, SKILL_LABELS
+from utils import geocode_address
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,9 @@ def init_session() -> None:
         "selected_skills": list(ALL_SKILLS),
         "purchase_price": 0,
         "hoa_fees": 0,
+        # Map state — reset whenever a new address is analyzed
+        "map_coords": None,      # (lat, lon) tuple or None
+        "map_address": "",       # address for which map_coords was geocoded
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -213,6 +217,9 @@ def render_sidebar() -> None:
             st.session_state.tool_results = {}
             st.session_state.errors = {}
             st.session_state.progress_log = []
+            # Reset map so it re-geocodes for the new address
+            st.session_state.map_coords = None
+            st.session_state.map_address = ""
             st.rerun()
 
 
@@ -294,6 +301,47 @@ def run_analysis() -> None:
     st.session_state.running = False
 
 
+# ── Location map ───────────────────────────────────────────────────────────────
+
+def render_map(address: str) -> None:
+    """Display an interactive OpenStreetMap tile centred on the property address.
+
+    Geocoding is performed once per address and cached in session state so
+    repeated Streamlit reruns don't fire extra HTTP requests.
+    """
+    import pandas as pd
+
+    # Use cached coords when the address hasn't changed
+    if (
+        st.session_state.get("map_coords") is None
+        or st.session_state.get("map_address") != address
+    ):
+        with st.spinner("📍 Locating property on map…"):
+            coords = geocode_address(address)
+        st.session_state.map_coords = coords
+        st.session_state.map_address = address
+
+    coords = st.session_state.map_coords
+
+    with st.expander("🗺️ Location Map", expanded=True):
+        if coords is None:
+            st.info(
+                "Map unavailable — address could not be geocoded. "
+                "Try including city, state, and ZIP code."
+            )
+            return
+
+        lat, lon = coords
+        df = pd.DataFrame({"lat": [lat], "lon": [lon]})
+
+        st.map(df, zoom=14, use_container_width=True)
+        st.caption(
+            f"📍 **{address}** &nbsp;·&nbsp; "
+            f"{lat:.5f}° N, {lon:.5f}° W &nbsp;·&nbsp; "
+            "Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors"
+        )
+
+
 # ── Results display ────────────────────────────────────────────────────────────
 
 def render_results() -> None:
@@ -353,6 +401,9 @@ def render_results() -> None:
             mime="text/markdown",
             use_container_width=True,
         )
+
+    # Location map — shown once results are available
+    render_map(st.session_state.address)
 
     st.divider()
 
