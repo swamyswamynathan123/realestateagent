@@ -8,46 +8,144 @@ from tools.base import BaseRealEstateTool
 
 COMPS_SYSTEM_PROMPT = """You are a real estate comparable sales analyst.
 
+Live web-search data may be included in the user message under the heading
+"## 🌐 Live Web Data". When that section is present:
+- Extract real addresses, sale prices, square footages, and dates from it.
+- Populate the comparable sales table with actual sold listings rather than
+  placeholder values wherever the data allows.
+- Note the data source in the footer as "Live web data (Tavily)" instead of
+  "AI estimate".
+
+When no live data is provided, rely on your training knowledge of the local
+market to produce plausible estimates and note the source as "AI estimate".
+
+Produce the analysis in this exact markdown format:
+
 ## Comparable Sales Analysis — {address}
 
 ### Subject Property Estimate
 **Estimated Value:** $XXX,XXX
 **Price per Sq Ft:** $XXX/sq ft
-**Property Type:** [type]
+**Property Type:** [SFR / Condo / Townhouse / Multi-Family]
+**Beds / Baths:** X / X
+**Est. Square Footage:** X,XXX sq ft
 
 ### Comparable Sales (5 comps)
-| Address | Sale Price | Sq Ft | $/Sq Ft | Distance | Days Ago | Notes |
-|---------|-----------|-------|---------|----------|----------|-------|
-| [comp 1]| $XXX,XXX | X,XXX | $XXX | X.X mi | XX | adj |
-| [comp 2]| $XXX,XXX | X,XXX | $XXX | X.X mi | XX | adj |
-| [comp 3]| $XXX,XXX | X,XXX | $XXX | X.X mi | XX | adj |
-| [comp 4]| $XXX,XXX | X,XXX | $XXX | X.X mi | XX | adj |
-| [comp 5]| $XXX,XXX | X,XXX | $XXX | X.X mi | XX | adj |
+| # | Address | Sale Price | Sq Ft | $/Sq Ft | Distance | Days Ago | Similarity |
+|---|---------|-----------|-------|---------|----------|----------|------------|
+| 1 | [address] | $XXX,XXX | X,XXX | $XXX | X.X mi | XX | High/Med/Low |
+| 2 | ... | ... | ... | ... | ... | ... | ... |
+| 3 | ... | ... | ... | ... | ... | ... | ... |
+| 4 | ... | ... | ... | ... | ... | ... | ... |
+| 5 | ... | ... | ... | ... | ... | ... | ... |
 
 ### Adjustment Analysis
-**Adjusted Value Range:** $XXX,XXX - $XXX,XXX
+| Adjustment Factor | Direction | Est. Impact |
+|-------------------|-----------|-------------|
+| Size difference | +/- | $X,XXX |
+| Age / condition | +/- | $X,XXX |
+| Location premium | +/- | $X,XXX |
+| Feature differences | +/- | $X,XXX |
+
+**Adjusted Value Range:** $XXX,XXX – $XXX,XXX
 **Median Comp Price:** $XXX,XXX
+**Recommended List Price:** $XXX,XXX
+
+### Market Context
+**Current Market:** [Strong Seller's / Balanced / Buyer's]
+**Avg Days on Market:** XX days
+**List-to-Sale Ratio:** XX.X%
 
 ### Comp Quality Assessment
-- **Data Quality:** XX/25
-- **Price Alignment:** XX/25
-- **Comp Relevance:** XX/25
-- **Market Trend:** XX/25
+- **Data Quality:** XX/25 — [notes]
+- **Price Alignment:** XX/25 — [notes]
+- **Comp Relevance:** XX/25 — [notes]
+- **Market Trend:** XX/25 — [notes]
 
 **Score:** XX/100
 **Grade:** [A+ through F]
 
-*AI estimate based on market knowledge. Verify with MLS data.*"""
+*Source: [Live web data (Tavily) | AI estimate based on market knowledge]. Verify with licensed MLS data before making offers.*"""
+
+# Real-estate listing portals likely to have recent sold data
+_COMPS_DOMAINS = [
+    "zillow.com", "redfin.com", "realtor.com",
+    "trulia.com", "homes.com", "homelight.com",
+]
+
+# Absolute cap on total web context injected into the prompt (chars)
+_MAX_WEB_CONTEXT_CHARS = 5_000
 
 
 class CompsTool(BaseRealEstateTool):
     skill_name = "comps"
     system_prompt = COMPS_SYSTEM_PROMPT
 
+    # ── Web data gathering ────────────────────────────────────────────────────
+
+    def _fetch_live_comps(self, address: str) -> str:
+        """
+        Run up to three Tavily searches to gather live comparable sales data.
+
+        Returns a formatted markdown block (possibly empty if Tavily is not
+        configured or all searches return no results).
+        """
+        sections: list[str] = []
+
+        # 1. Recently sold listings on the major portals
+        sold = self._web_search(
+            f'recently sold homes comparable to "{address}" sale price square footage 2024 2025',
+            max_results=5,
+            include_domains=_COMPS_DOMAINS,
+        )
+        if sold:
+            sections.append(f"### Recently Sold Listings (Zillow / Redfin / Realtor)\n{sold}")
+
+        # 2. Broader search — catches local news, county records, aggregators
+        recent = self._web_search(
+            f'"{address}" comparable home sales sold price per square foot recent',
+            max_results=4,
+        )
+        if recent:
+            sections.append(f"### Additional Comparable Sales Data\n{recent}")
+
+        # 3. Local market context — median prices, days on market, trends
+        market = self._web_search(
+            f"real estate market median home price recently sold {address} 2024 2025 trends",
+            max_results=3,
+        )
+        if market:
+            sections.append(f"### Local Market Context\n{market}")
+
+        if not sections:
+            return ""
+
+        body = "\n\n".join(sections)
+
+        # Guard against runaway context size
+        if len(body) > _MAX_WEB_CONTEXT_CHARS:
+            body = body[:_MAX_WEB_CONTEXT_CHARS] + "\n\n*[web data truncated for length]*"
+
+        return (
+            "## 🌐 Live Web Data\n\n"
+            "Use the real listing data below to populate the comparable sales table. "
+            "Extract actual addresses, prices, and square footages where available.\n\n"
+            + body
+        )
+
+    # ── Tool entry point ──────────────────────────────────────────────────────
+
     def run(self, address: str, **kwargs) -> dict:
         prompt = self.system_prompt.replace("{address}", address)
+
+        # Assemble user message with optional live comps block
+        user_msg = f"Property address: {address}"
+        live_data = self._fetch_live_comps(address)
+        if live_data:
+            user_msg += f"\n\n{live_data}"
+
         try:
-            output = self._call_llm(prompt, f"Property address: {address}")
+            output = self._call_llm(prompt, user_msg)
             return self._success_result(address, output)
         except Exception as e:
             return self._error_result(address, str(e))

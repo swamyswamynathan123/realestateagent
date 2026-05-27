@@ -9,6 +9,7 @@ Each tool:
      {skill, address, output, score, grade, status, error}
 """
 from __future__ import annotations
+import os
 import re
 import logging
 from abc import ABC, abstractmethod
@@ -80,6 +81,55 @@ class BaseRealEstateTool(ABC):
         if score >= 40: return "C"
         if score >= 25: return "D"
         return "F"
+
+    # ── Web search ────────────────────────────────────────────────────────────
+
+    def _web_search(
+        self,
+        query: str,
+        max_results: int = 5,
+        include_domains: Optional[list[str]] = None,
+        max_chars_per_result: int = 600,
+    ) -> str:
+        """Search the web via Tavily and return formatted markdown text.
+
+        Returns an empty string if TAVILY_API_KEY is not set or the search
+        fails — callers should treat '' as 'no live data available'.
+
+        Parameters
+        ----------
+        query:
+            The search query string.
+        max_results:
+            Maximum number of results to request from Tavily.
+        include_domains:
+            Optional allow-list of domains (e.g. ["zillow.com", "redfin.com"]).
+        max_chars_per_result:
+            Character cap applied to each result's content snippet.
+        """
+        api_key = os.environ.get("TAVILY_API_KEY", "")
+        if not api_key:
+            return ""
+        try:
+            from tavily import TavilyClient
+            client = TavilyClient(api_key=api_key)
+            search_kwargs: dict = {"max_results": max_results}
+            if include_domains:
+                search_kwargs["include_domains"] = include_domains
+            response = client.search(query, **search_kwargs)
+            results = response.get("results", [])
+            if not results:
+                return ""
+            lines = []
+            for r in results:
+                title = r.get("title", "No title")
+                content = (r.get("content") or "")[:max_chars_per_result].strip()
+                url = r.get("url", "")
+                lines.append(f"**{title}**\n{content}\n*{url}*")
+            return "\n\n".join(lines)
+        except Exception:
+            logger.warning("Web search failed for query: %.60s", query, exc_info=True)
+            return ""
 
     def _error_result(self, address: str, error: str) -> dict:
         return {

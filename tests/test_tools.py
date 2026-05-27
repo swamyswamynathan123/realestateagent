@@ -130,6 +130,43 @@ def test_comps_tool(mock_llm):
     assert result["status"] == "success"
 
 
+def test_comps_tool_no_tavily_key_no_web_data(mock_llm, monkeypatch):
+    """Without a Tavily key the tool should succeed using LLM knowledge only."""
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    from tools.property_analysis import CompsTool
+    result = CompsTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["status"] == "success"
+    # LLM was called exactly once — no search made
+    assert mock_llm.invoke.call_count == 1
+    # No live-data header injected
+    call_args = mock_llm.invoke.call_args[0][0]
+    user_msg = call_args[-1].content  # last message is HumanMessage
+    assert "🌐 Live Web Data" not in user_msg
+
+
+def test_comps_tool_injects_tavily_results(mock_llm, monkeypatch, mocker):
+    """With a Tavily key the tool injects search results into the LLM prompt."""
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-key")
+    # Patch TavilyClient.search to return a canned result
+    fake_results = {
+        "results": [
+            {
+                "title": "456 Oak Ave Austin TX — Sold $450,000",
+                "content": "3 bed 2 bath 1,800 sq ft sold 30 days ago for $450,000 ($250/sqft)",
+                "url": "https://www.zillow.com/fake",
+            }
+        ]
+    }
+    mocker.patch("tavily.TavilyClient.search", return_value=fake_results)
+    from tools.property_analysis import CompsTool
+    result = CompsTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["status"] == "success"
+    call_args = mock_llm.invoke.call_args[0][0]
+    user_msg = call_args[-1].content
+    assert "🌐 Live Web Data" in user_msg
+    assert "456 Oak Ave" in user_msg
+
+
 def test_rental_tool(mock_llm):
     from tools.property_analysis import RentalTool
     result = RentalTool(llm=mock_llm).run("123 Main St, Austin TX")
