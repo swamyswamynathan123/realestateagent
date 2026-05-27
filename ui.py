@@ -356,6 +356,7 @@ def main() -> None:
     # Execute graph if triggered
     if st.session_state.running:
         run_analysis()
+        st.rerun()  # Re-render so the button reflects running=False and results display
 
     # Show results (or welcome screen)
     render_results()
