@@ -174,7 +174,7 @@ def render_sidebar() -> None:
                     if n_search:
                         parts.append(f"{n_search} search")
                     col_cache.caption(f"💾 Cache: {', '.join(parts)}")
-                    if col_clear.button("Clear", key="btn_clear_cache", use_container_width=True):
+                    if col_clear.button("Clear", key="btn_clear_cache", width='stretch'):
                         llm_cache.clear()
                         st.toast("Cache cleared (LLM + search)", icon="🗑️")
                         st.rerun()
@@ -227,11 +227,11 @@ def render_sidebar() -> None:
         st.subheader("📋 Analysis Modules")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("All", use_container_width=True, key="btn_all"):
+            if st.button("All", width='stretch', key="btn_all"):
                 st.session_state.selected_skills = list(ALL_SKILLS)
                 st.rerun()
         with col2:
-            if st.button("Core Only", use_container_width=True, key="btn_core"):
+            if st.button("Core Only", width='stretch', key="btn_core"):
                 st.session_state.selected_skills = [
                     "quick", "screen", "comps", "rental", "neighborhood"
                 ]
@@ -263,7 +263,7 @@ def render_sidebar() -> None:
         can_generate = bool(address.strip()) and bool(openai_key.strip())
         generate_clicked = st.button(
             "🚀 Generate Report",
-            use_container_width=True,
+            width='stretch',
             disabled=not can_generate or st.session_state.running,
             type="primary",
             key="btn_generate",
@@ -326,7 +326,7 @@ def _render_history_sidebar() -> None:
                 if st.button(
                     f"📄 {addr_short}\n{ts_short}{avg_score}",
                     key=f"hist_load_{r['id']}",
-                    use_container_width=True,
+                    width='stretch',
                 ):
                     full = load_report(r["id"])
                     if full:
@@ -343,7 +343,7 @@ def _render_history_sidebar() -> None:
                     delete_report(r["id"])
                     st.rerun()
 
-        if st.button("Clear All History", key="hist_clear", use_container_width=True):
+        if st.button("Clear All History", key="hist_clear", width='stretch'):
             clear_history()
             st.rerun()
 
@@ -475,7 +475,7 @@ def render_map(address: str) -> None:
 
         lat, lon = cached_coords
         df = pd.DataFrame({"lat": [lat], "lon": [lon]})
-        st.map(df, zoom=14, use_container_width=True)
+        st.map(df, zoom=14, width='stretch')
         st.caption(
             f"📍 **{address}** &nbsp;·&nbsp; "
             f"{lat:.5f}°, {lon:.5f}° &nbsp;·&nbsp; "
@@ -497,10 +497,10 @@ def render_quick_links(address: str) -> None:
 
     with st.expander("🔗 Property Quick Links", expanded=False):
         c1, c2, c3, c4 = st.columns(4)
-        c1.link_button("🏠 Zillow",       zillow_url,  use_container_width=True)
-        c2.link_button("🔴 Redfin",       redfin_url,  use_container_width=True)
-        c3.link_button("🏡 Realtor.com",  realtor_url, use_container_width=True)
-        c4.link_button("🗺️ Google Maps",  maps_url,    use_container_width=True)
+        c1.link_button("🏠 Zillow",       zillow_url,  width='stretch')
+        c2.link_button("🔴 Redfin",       redfin_url,  width='stretch')
+        c3.link_button("🏡 Realtor.com",  realtor_url, width='stretch')
+        c4.link_button("🗺️ Google Maps",  maps_url,    width='stretch')
 
 
 # ── Street View ────────────────────────────────────────────────────────────────
@@ -557,7 +557,7 @@ def render_charts(tool_results: dict, address: str) -> None:
     with tab_radar:
         fig = ch.score_radar(tool_results, address)
         if fig:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
             # Score table
             import re
             scores = {}
@@ -588,7 +588,7 @@ def render_charts(tool_results: dict, address: str) -> None:
     with tab_cashflow:
         fig = ch.cashflow_waterfall(tool_results)
         if fig:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
             st.caption(
                 "Cash flow breakdown parsed from the Rental & Cash Flow analysis. "
                 "Negative bars are expenses; the final bar is net monthly cash flow."
@@ -599,7 +599,7 @@ def render_charts(tool_results: dict, address: str) -> None:
     with tab_comps:
         fig = ch.comp_prices_bar(tool_results)
         if fig:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
             st.caption(
                 "Comparable sale prices parsed from the Comparable Sales analysis."
             )
@@ -720,7 +720,7 @@ def render_results() -> None:
                 data=f.read(),
                 file_name=os.path.basename(pdf_path),
                 mime="application/pdf",
-                use_container_width=True,
+                width='stretch',
             )
     elif report_md:
         c3.download_button(
@@ -728,7 +728,7 @@ def render_results() -> None:
             data=report_md.encode("utf-8"),
             file_name="real_estate_report.md",
             mime="text/markdown",
-            use_container_width=True,
+            width='stretch',
         )
 
     # ── Interactive Charts ──────────────────────────────────────────────────────
