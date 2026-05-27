@@ -140,6 +140,23 @@ def test_census_handles_api_error(monkeypatch, tmp_path):
         assert get_acs_data("123 Main St, Austin, TX 78701") is None
 
 
+def test_census_handles_non_json_response(monkeypatch, tmp_path):
+    """Census API returns plain text for ZIPs that aren't ZCTAs (e.g. 93001)."""
+    monkeypatch.setattr("data_sources._cache._CACHE_DB", str(tmp_path / "census_nonjson.db"))
+    monkeypatch.setattr("data_sources._cache._INIT_DONE", set())
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.text = "No results were returned by your request."
+
+    with patch("data_sources.census.requests.get", return_value=mock_resp):
+        from data_sources.census import get_acs_data
+        # Must return None gracefully, not raise JSONDecodeError
+        result = get_acs_data("123 Main St, Ventura, CA 93001")
+        assert result is None
+
+
 # ── HUD tests ──────────────────────────────────────────────────────────────────
 
 def test_hud_returns_none_without_key(monkeypatch):

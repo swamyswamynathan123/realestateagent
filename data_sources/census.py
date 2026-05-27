@@ -62,8 +62,23 @@ def get_acs_data(address: str, api_key: Optional[str] = None) -> Optional[dict]:
     try:
         r = requests.get(_BASE_URL, params=params, timeout=_TIMEOUT)
         r.raise_for_status()
+
+        # Guard: some ZIPs are not ZCTAs and the API returns a plain-text or
+        # HTML error instead of JSON.  Check the body before parsing.
+        body = r.text.strip()
+        if not body or not body.startswith("["):
+            logger.debug(
+                "Census ACS: no JSON data for ZIP %s (response: %s…)",
+                zip_code, body[:120],
+            )
+            # Cache the miss briefly so the 3 tools that call this don't each
+            # make a live request for the same un-served ZIP.
+            cache_put(cache_key, None, ttl_hours=1)
+            return None
+
         rows = r.json()
         if len(rows) < 2:
+            cache_put(cache_key, None, ttl_hours=1)
             return None
 
         headers = rows[0]
@@ -91,4 +106,5 @@ def get_acs_data(address: str, api_key: Optional[str] = None) -> Optional[dict]:
 
     except Exception:
         logger.warning("Census ACS fetch failed for ZIP %s", zip_code, exc_info=True)
+        cache_put(cache_key, None, ttl_hours=1)  # avoid hammering on repeated calls
     return None
