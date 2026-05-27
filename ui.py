@@ -17,6 +17,12 @@ from utils import geocode_address
 logger = logging.getLogger(__name__)
 
 
+def _set_env_if_truthy(var: str, value: str) -> None:
+    """Set an env var only when the value is non-empty (never overwrite with '')."""
+    if value and value.strip():
+        os.environ[var] = value.strip()
+
+
 # ── Page config ────────────────────────────────────────────────────────────────
 
 def configure_page() -> None:
@@ -101,6 +107,59 @@ def render_sidebar() -> None:
             key="input_tavily_key",
         )
         st.session_state.tavily_key = tavily_key
+
+        # ── Free real data API keys ────────────────────────────────────────────
+        with st.expander("🏛️ Free Real Data APIs", expanded=False):
+            st.caption(
+                "Connect free government and public APIs for real (non-AI) data. "
+                "Each is optional — tools fall back to AI estimates if not set."
+            )
+            fred_key = st.text_input(
+                "FRED API Key",
+                value=st.session_state.get("fred_key", config.FRED_API_KEY),
+                type="password",
+                placeholder="abcdef1234...",
+                help="Real mortgage rates (Freddie Mac). "
+                     "Free: fred.stlouisfed.org/docs/api/api_key.html",
+                key="input_fred_key",
+            )
+            st.session_state["fred_key"] = fred_key
+
+            census_key = st.text_input(
+                "Census API Key",
+                value=st.session_state.get("census_key", config.CENSUS_API_KEY),
+                type="password",
+                placeholder="(optional — works without key)",
+                help="Median home values & income. "
+                     "Free: api.census.gov/data/key_signup.html",
+                key="input_census_key",
+            )
+            st.session_state["census_key"] = census_key
+
+            hud_key = st.text_input(
+                "HUD API Token",
+                value=st.session_state.get("hud_key", config.HUD_API_KEY),
+                type="password",
+                placeholder="eyJ...",
+                help="Fair Market Rents by ZIP code. "
+                     "Free: huduser.gov/hudapi/public/register.php",
+                key="input_hud_key",
+            )
+            st.session_state["hud_key"] = hud_key
+
+            walkscore_key = st.text_input(
+                "Walk Score API Key",
+                value=st.session_state.get("walkscore_key", config.WALKSCORE_API_KEY),
+                type="password",
+                placeholder="(your Walk Score key)",
+                help="Walkability / Transit / Bike scores. "
+                     "Free: walkscore.com/professional/api.php",
+                key="input_walkscore_key",
+            )
+            st.session_state["walkscore_key"] = walkscore_key
+
+            fema_status = "✅ Active (no key needed)" if True else ""
+            st.caption(f"🌊 **FEMA Flood Zones** — {fema_status}")
 
         # Cache status + clear button
         if config.LLM_CACHE_ENABLED:
@@ -304,6 +363,12 @@ def run_analysis() -> None:
     os.environ["OPENAI_API_KEY"] = openai_key
     if tavily_key:
         os.environ["TAVILY_API_KEY"] = tavily_key
+
+    # Free real data source keys (all optional)
+    _set_env_if_truthy("FRED_API_KEY",       st.session_state.get("fred_key", ""))
+    _set_env_if_truthy("CENSUS_API_KEY",     st.session_state.get("census_key", ""))
+    _set_env_if_truthy("HUD_API_KEY",        st.session_state.get("hud_key", ""))
+    _set_env_if_truthy("WALKSCORE_API_KEY",  st.session_state.get("walkscore_key", ""))
 
     # Lazy import — avoids LLM init at module load time
     from graph import build_graph

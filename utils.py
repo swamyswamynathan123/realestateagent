@@ -2,6 +2,7 @@
 utils.py — Report formatting, PDF generation, retry helpers.
 """
 from __future__ import annotations
+import functools
 import os
 import re
 import logging
@@ -73,6 +74,7 @@ def _broad_query(address: str) -> str:
     return address
 
 
+@functools.lru_cache(maxsize=200)
 def geocode_address(address: str) -> Optional[tuple[float, float]]:
     """
     Convert a US property address to (latitude, longitude).  No API key required.

@@ -8,14 +8,22 @@ from tools.base import BaseRealEstateTool
 
 NEIGHBORHOOD_PROMPT = """You are a neighborhood analysis expert.
 
+Real data may be included under "## 🏛️ Live Real Data". When present:
+- Use the exact Walk Score, Transit Score, and Bike Score values — do NOT estimate them.
+- Use the FEMA flood zone in the safety section and note it as a real risk factor.
+- Use Census demographics (population, income, owner/renter mix) for the Growth Indicators.
+- Note sources inline: "(Walk Score®)", "(FEMA NFHL)", "(US Census ACS)".
+
+When no real data is provided, use your training knowledge and note "AI estimate".
+
 ## Neighborhood Analysis — {address}
 
 ### Location Scores (0-20 each)
 | Category | Score | Key Factors |
 |----------|-------|-------------|
 | Schools | XX/20 | [school names, ratings] |
-| Safety | XX/20 | [crime index, trends] |
-| Walkability & Transit | XX/20 | [Walk Score, bike, transit] |
+| Safety | XX/20 | [crime index, flood zone, trends] |
+| Walkability & Transit | XX/20 | [Walk Score XX, Transit Score XX, Bike Score XX] |
 | Amenities | XX/20 | [grocery, dining, parks] |
 | Growth Trajectory | XX/20 | [development, jobs, population] |
 
@@ -27,7 +35,13 @@ NEIGHBORHOOD_PROMPT = """You are a neighborhood analysis expert.
 
 ### Safety Overview
 **Crime Index:** [Low/Moderate/High] relative to national avg
+**Flood Zone:** [FEMA zone code] — [risk level]
 **Trend:** [Improving/Stable/Worsening]
+
+### Walkability
+**Walk Score:** XX/100 — [description]
+**Transit Score:** XX/100 — [description]
+**Bike Score:** XX/100 — [description]
 
 ### Amenities Within 1 Mile
 - Grocery: [nearest stores]
@@ -35,21 +49,118 @@ NEIGHBORHOOD_PROMPT = """You are a neighborhood analysis expert.
 - Parks: [nearest parks]
 - Healthcare: [nearest hospital/clinic]
 
+### Demographic Snapshot
+- Population (ZIP): [XX,XXX]
+- Median Household Income: $XX,XXX/yr
+- Owner-Occupied: XX% | Renter-Occupied: XX%
+
 ### Growth Indicators
 [2-3 sentences on development pipeline, job growth, population trends]
 
 **Score:** XX/100
-**Grade:** [A+ through F]"""
+**Grade:** [A+ through F]
+
+*Source: [Walk Score® / FEMA NFHL / US Census ACS | AI estimate]*"""
 
 
 class NeighborhoodTool(BaseRealEstateTool):
     skill_name = "neighborhood"
     system_prompt = NEIGHBORHOOD_PROMPT
 
+    def _fetch_real_data(self, address: str) -> str:
+        """Fetch Walk Score, FEMA flood zone, and Census demographics."""
+        sections: list[str] = []
+
+        # Geocode once — needed for Walk Score and FEMA
+        try:
+            from utils import geocode_address
+            coords = geocode_address(address)
+            lat, lon = coords if coords else (None, None)
+        except Exception:
+            lat, lon = None, None
+
+        # Walk Score
+        if lat and lon:
+            try:
+                from data_sources.walk_score import get_walk_score
+                ws = get_walk_score(address, lat, lon)
+                if ws:
+                    lines = ["### Walk Score® (official scores)"]
+                    if ws.get("walk_score") is not None:
+                        lines.append(f"- **Walk Score: {ws['walk_score']}/100** — {ws.get('walk_desc', '')}")
+                    if ws.get("transit_score") is not None:
+                        lines.append(f"- **Transit Score: {ws['transit_score']}/100** — {ws.get('transit_desc', '')}")
+                    if ws.get("bike_score") is not None:
+                        lines.append(f"- **Bike Score: {ws['bike_score']}/100** — {ws.get('bike_desc', '')}")
+                    lines.append(f"- *Source: {ws.get('source', 'Walk Score®')}*")
+                    sections.append("\n".join(lines))
+            except Exception:
+                pass
+
+        # FEMA flood zone
+        if lat and lon:
+            try:
+                from data_sources.fema import get_flood_zone
+                flood = get_flood_zone(lat, lon)
+                if flood:
+                    risk_icon = "🔴" if flood["sfha"] else "🟢"
+                    lines = [
+                        "### FEMA Flood Zone (National Flood Hazard Layer)",
+                        f"- **Flood Zone: {flood['zone']}** — {flood['description']}",
+                        f"- **Risk Level: {risk_icon} {flood['risk_level']}**",
+                        f"- **SFHA (Special Flood Hazard Area):** "
+                        f"{'Yes — federal flood insurance required for backed loans' if flood['sfha'] else 'No'}",
+                    ]
+                    if flood.get("base_flood_elevation"):
+                        lines.append(f"- Base Flood Elevation: {flood['base_flood_elevation']} ft NAVD")
+                    lines.append(f"- *Source: {flood['source']}*")
+                    sections.append("\n".join(lines))
+            except Exception:
+                pass
+
+        # Census ACS demographics
+        try:
+            from data_sources.census import get_acs_data
+            acs = get_acs_data(address)
+            if acs:
+                lines = [f"### US Census ACS Demographics — ZIP {acs['zip']}"]
+                if acs.get("population"):
+                    lines.append(f"- Population: **{acs['population']:,}**")
+                if acs.get("median_home_value"):
+                    lines.append(f"- Median home value: **${acs['median_home_value']:,}**")
+                if acs.get("median_income"):
+                    lines.append(f"- Median household income: **${acs['median_income']:,}/yr**")
+                own = acs.get("owner_occupied") or 0
+                rnt = acs.get("renter_occupied") or 0
+                if own + rnt > 0:
+                    owner_pct = int(own / (own + rnt) * 100)
+                    renter_pct = 100 - owner_pct
+                    lines.append(f"- Owner-occupied: **{owner_pct}%** | Renter-occupied: **{renter_pct}%**")
+                lines.append(f"- *Source: {acs['source']}*")
+                sections.append("\n".join(lines))
+        except Exception:
+            pass
+
+        if not sections:
+            return ""
+
+        return (
+            "## 🏛️ Live Real Data\n\n"
+            "Use the real data below in the neighborhood analysis. "
+            "Walk Scores and FEMA flood zone are official published figures.\n\n"
+            + "\n\n".join(sections)
+        )
+
     def run(self, address: str, **kwargs) -> dict:
         prompt = self.system_prompt.replace("{address}", address)
+        user_msg = f"Property address: {address}"
+
+        real_data = self._fetch_real_data(address)
+        if real_data:
+            user_msg += f"\n\n{real_data}"
+
         try:
-            output = self._call_llm(prompt, f"Property address: {address}")
+            output = self._call_llm(prompt, user_msg)
             return self._success_result(address, output)
         except Exception as e:
             return self._error_result(address, str(e))

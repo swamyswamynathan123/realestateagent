@@ -20,6 +20,16 @@ OPENAI_TEMPERATURE: float = float(os.getenv("OPENAI_TEMPERATURE", "0.1"))
 TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
 USE_WEB_SEARCH: bool = bool(TAVILY_API_KEY)
 
+# ── Free real data sources (all optional) ─────────────────────────────────────
+# FRED (Freddie Mac mortgage rates): https://fred.stlouisfed.org/docs/api/api_key.html
+FRED_API_KEY: str = os.getenv("FRED_API_KEY", "")
+# US Census ACS (median home values, income): https://api.census.gov/data/key_signup.html
+CENSUS_API_KEY: str = os.getenv("CENSUS_API_KEY", "")
+# HUD Fair Market Rents: https://www.huduser.gov/hudapi/public/register.php
+HUD_API_KEY: str = os.getenv("HUD_API_KEY", "")
+# Walk Score (walkability): https://www.walkscore.com/professional/api.php
+WALKSCORE_API_KEY: str = os.getenv("WALKSCORE_API_KEY", "")
+
 # ── PDF ───────────────────────────────────────────────────────────────────────
 PDF_OUTPUT_DIR: str = os.getenv("PDF_OUTPUT_DIR", "reports")
 

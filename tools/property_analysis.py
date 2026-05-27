@@ -232,6 +232,14 @@ class CompsTool(BaseRealEstateTool):
 RENTAL_SYSTEM_PROMPT = """You are a rental income and cash flow analysis specialist.
 Provide detailed rental analysis using conservative assumptions.
 
+Real government data may be included under "## 🏛️ Live Real Data". When present:
+- Use the HUD Fair Market Rents (FMR) as your primary basis for rental income estimates.
+  These are official government benchmarks published annually.
+- Use the Census income and renter-rate data to contextualise demand.
+- Note the source as "HUD Fair Market Rents / US Census" in the footer.
+
+When no real data is provided, use your training knowledge and note "AI estimate".
+
 ## Rental & Cash Flow Analysis — {address}
 
 ### Rental Income Estimate
@@ -241,7 +249,7 @@ Provide detailed rental analysis using conservative assumptions.
 | Moderate | $X,XXX | $XX,XXX |
 | Optimistic | $X,XXX | $XX,XXX |
 
-### Monthly Cash Flow (Moderate Scenario, 25% down, 30yr fixed ~7%)
+### Monthly Cash Flow (Moderate Scenario, 25% down, 30yr fixed)
 | Item | Amount |
 |------|--------|
 | Gross Rent | $X,XXX |
@@ -273,12 +281,75 @@ Provide detailed rental analysis using conservative assumptions.
 - DSCR: XX/15
 
 **Score:** XX/100
-**Grade:** [A+ through F]"""
+**Grade:** [A+ through F]
+
+*Source: [HUD Fair Market Rents / US Census | AI estimate]. Verify before making investment decisions.*"""
 
 
 class RentalTool(BaseRealEstateTool):
     skill_name = "rental"
     system_prompt = RENTAL_SYSTEM_PROMPT
+
+    def _fetch_real_data(self, address: str) -> str:
+        """Fetch HUD Fair Market Rents and Census income data."""
+        sections: list[str] = []
+
+        # HUD Fair Market Rents
+        try:
+            from data_sources.hud import get_fair_market_rents
+            fmr = get_fair_market_rents(address)
+            if fmr:
+                lines = [
+                    f"### HUD Fair Market Rents (FY{fmr.get('year', 2024)}) — ZIP {fmr['zip']}",
+                    f"**County / Metro:** {fmr.get('county', 'N/A')} / {fmr.get('metro_area', 'N/A')}",
+                ]
+                if fmr.get("fmr_studio") is not None:
+                    lines.append(f"- Studio (0BR): **${fmr['fmr_studio']:,}/mo**")
+                if fmr.get("fmr_1br") is not None:
+                    lines.append(f"- 1 Bedroom: **${fmr['fmr_1br']:,}/mo**")
+                if fmr.get("fmr_2br") is not None:
+                    lines.append(f"- 2 Bedrooms: **${fmr['fmr_2br']:,}/mo**")
+                if fmr.get("fmr_3br") is not None:
+                    lines.append(f"- 3 Bedrooms: **${fmr['fmr_3br']:,}/mo**")
+                if fmr.get("fmr_4br") is not None:
+                    lines.append(f"- 4 Bedrooms: **${fmr['fmr_4br']:,}/mo**")
+                lines.append(f"- *Source: {fmr['source']}*")
+                sections.append("\n".join(lines))
+        except Exception:
+            pass
+
+        # Census income + renter share
+        try:
+            from data_sources.census import get_acs_data
+            acs = get_acs_data(address)
+            if acs:
+                lines = [f"### US Census ACS Data — ZIP {acs['zip']}"]
+                if acs.get("median_income"):
+                    lines.append(
+                        f"- Median household income: **${acs['median_income']:,}/yr**"
+                        f" (${acs['median_income'] // 12:,}/mo)"
+                    )
+                own = acs.get("owner_occupied") or 0
+                rent = acs.get("renter_occupied") or 0
+                if own + rent > 0:
+                    pct = int(rent / (own + rent) * 100)
+                    lines.append(f"- Renter-occupied housing units: **{pct}%**")
+                if acs.get("median_home_value"):
+                    lines.append(f"- Median home value: **${acs['median_home_value']:,}**")
+                lines.append(f"- *Source: {acs['source']}*")
+                sections.append("\n".join(lines))
+        except Exception:
+            pass
+
+        if not sections:
+            return ""
+
+        return (
+            "## 🏛️ Live Real Data\n\n"
+            "Use the HUD Fair Market Rents below as your primary rental income basis. "
+            "These are official US government benchmarks, not estimates.\n\n"
+            + "\n\n".join(sections)
+        )
 
     def run(self, address: str, **kwargs) -> dict:
         prompt = self.system_prompt.replace("{address}", address)
@@ -287,6 +358,11 @@ class RentalTool(BaseRealEstateTool):
             user_msg += f"\nSale price: ${kwargs['purchase_price']:,}"
         if kwargs.get("hoa_fees"):
             user_msg += f"\nMonthly HOA fees: ${kwargs['hoa_fees']:,}/mo (use this exact figure in the cash flow table)"
+
+        real_data = self._fetch_real_data(address)
+        if real_data:
+            user_msg += f"\n\n{real_data}"
+
         try:
             output = self._call_llm(prompt, user_msg)
             return self._success_result(address, output)
@@ -298,11 +374,17 @@ class RentalTool(BaseRealEstateTool):
 
 MORTGAGE_SYSTEM_PROMPT = """You are a mortgage calculator and affordability specialist.
 
+Real mortgage rate data may be included under "## 🏛️ Live Real Data". When present:
+- Use the exact FRED/Freddie Mac rates for your calculations.
+- Do NOT use the approximate placeholder rates (~7.0%, ~6.3%) — use the real figures.
+- Note the source as "Freddie Mac via FRED" in the footer.
+
+When no real data is provided, use current market rates and note "AI estimate".
+
 ## Mortgage Analysis — {address}
 
 ### Loan Scenarios
 Assume estimated purchase price from comps. Show 4 down payment scenarios (5%, 10%, 20%, 25%).
-Assume current 30yr fixed rate ~7.0%, 15yr ~6.3%.
 
 | Down Payment | Loan Amount | Monthly P&I | Total Interest | Monthly PITI |
 |-------------|-------------|-------------|----------------|--------------|
@@ -310,6 +392,11 @@ Assume current 30yr fixed rate ~7.0%, 15yr ~6.3%.
 | 10% | $XXX,XXX | $X,XXX | $XXX,XXX | $X,XXX |
 | 20% | $XXX,XXX | $X,XXX | $XXX,XXX | $X,XXX |
 | 25% | $XXX,XXX | $X,XXX | $XXX,XXX | $X,XXX |
+
+### Current Rate Used
+**30-Year Fixed:** X.XX%
+**15-Year Fixed:** X.XX%
+*Source: [Freddie Mac via FRED | AI estimate]*
 
 ### Affordability Thresholds (28/36 Rule)
 | Income Needed | For 5% Down | For 20% Down |
@@ -331,6 +418,52 @@ class MortgageTool(BaseRealEstateTool):
     skill_name = "mortgage"
     system_prompt = MORTGAGE_SYSTEM_PROMPT
 
+    def _fetch_real_data(self, address: str) -> str:
+        """Fetch FRED mortgage rates and Census median home value."""
+        sections: list[str] = []
+
+        # FRED mortgage rates
+        try:
+            from data_sources.fred import get_mortgage_rates
+            rates = get_mortgage_rates()
+            if rates:
+                lines = [
+                    f"### Current Mortgage Rates ({rates['source']})",
+                    f"- **30-year fixed rate: {rates['rate_30yr']:.2f}%**",
+                ]
+                if rates.get("rate_15yr") is not None:
+                    lines.append(f"- **15-year fixed rate: {rates['rate_15yr']:.2f}%**")
+                lines.append(f"- As of: {rates['as_of']}")
+                sections.append("\n".join(lines))
+        except Exception:
+            pass
+
+        # Census median home value (useful anchor when no purchase price given)
+        try:
+            from data_sources.census import get_acs_data
+            acs = get_acs_data(address)
+            if acs and acs.get("median_home_value"):
+                lines = [
+                    f"### US Census Median Home Value — ZIP {acs['zip']}",
+                    f"- Median owner-occupied home value: **${acs['median_home_value']:,}**",
+                ]
+                if acs.get("median_income"):
+                    lines.append(f"- Median household income: **${acs['median_income']:,}/yr**")
+                lines.append(f"- *Source: {acs['source']}*")
+                sections.append("\n".join(lines))
+        except Exception:
+            pass
+
+        if not sections:
+            return ""
+
+        return (
+            "## 🏛️ Live Real Data\n\n"
+            "Use the mortgage rates below for all calculations — "
+            "these are real figures from Freddie Mac's weekly survey.\n\n"
+            + "\n\n".join(sections)
+        )
+
     def run(self, address: str, **kwargs) -> dict:
         purchase_price = kwargs.get("purchase_price")
         hoa_fees = kwargs.get("hoa_fees")
@@ -340,6 +473,11 @@ class MortgageTool(BaseRealEstateTool):
             user_msg += f"\nEstimated purchase price: ${purchase_price:,}"
         if hoa_fees:
             user_msg += f"\nMonthly HOA fees: ${hoa_fees:,}/mo (include in PITI calculations)"
+
+        real_data = self._fetch_real_data(address)
+        if real_data:
+            user_msg += f"\n\n{real_data}"
+
         try:
             output = self._call_llm(prompt, user_msg)
             return self._success_result(address, output)
