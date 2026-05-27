@@ -4,6 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+A virtual environment is at `.venv/`. Activate it first:
+
+```powershell
+# Activate (PowerShell)
+.\.venv\Scripts\Activate.ps1
+
+# Activate (cmd)
+.\.venv\Scripts\activate.bat
+```
+
 ```powershell
 # Run the app
 streamlit run main.py
@@ -19,6 +29,10 @@ pytest tests/test_graph.py::test_graph_compiles -v
 
 # Verify a module imports cleanly
 python -c "from graph import build_graph; g = build_graph(); print(g.nodes)"
+
+# Run directly inside venv without activating
+.\.venv\Scripts\pytest tests/ -v
+.\.venv\Scripts\streamlit run main.py
 ```
 
 No build step. No linter configured.
