@@ -146,3 +146,26 @@ def test_mortgage_tool_with_price(mock_llm):
     call_args = mock_llm.invoke.call_args
     user_message = call_args[0][0][-1].content  # last message is HumanMessage
     assert "400,000" in user_message
+
+
+# ── Task 7: Location & market tool tests ───────────────────────────────────────
+
+def test_neighborhood_tool(mock_llm):
+    from tools.location_tools import NeighborhoodTool
+    result = NeighborhoodTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["skill"] == "neighborhood"
+    assert result["status"] == "success"
+
+
+def test_market_tool(mock_llm):
+    from tools.location_tools import MarketTool
+    result = MarketTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["skill"] == "market"
+    assert result["status"] == "success"
+
+
+def test_listing_tool(mock_llm):
+    from tools.location_tools import ListingTool
+    result = ListingTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["skill"] == "listing"
+    assert result["status"] == "success"
