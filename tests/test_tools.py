@@ -119,3 +119,30 @@ def test_screen_tool_detects_validation_failed(mock_llm):
     tool = ScreenTool(llm=mock_llm)
     result = tool.run("asdfghjkl")
     assert result["validation_passed"] is False
+
+
+# ── Task 6: Property analysis tool tests ───────────────────────────────────────
+
+def test_comps_tool(mock_llm):
+    from tools.property_analysis import CompsTool
+    result = CompsTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["skill"] == "comps"
+    assert result["status"] == "success"
+
+
+def test_rental_tool(mock_llm):
+    from tools.property_analysis import RentalTool
+    result = RentalTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["skill"] == "rental"
+    assert result["status"] == "success"
+
+
+def test_mortgage_tool_with_price(mock_llm):
+    from tools.property_analysis import MortgageTool
+    result = MortgageTool(llm=mock_llm).run("123 Main St, Austin TX", purchase_price=400000)
+    assert result["skill"] == "mortgage"
+    assert result["status"] == "success"
+    # Verify the purchase price was included in the LLM call
+    call_args = mock_llm.invoke.call_args
+    user_message = call_args[0][0][-1].content  # last message is HumanMessage
+    assert "400,000" in user_message
