@@ -2,6 +2,7 @@
 tools/property_analysis.py — Comparable Sales, Rental/Cash Flow, Mortgage Calculator
 """
 from __future__ import annotations
+import re
 from tools.base import BaseRealEstateTool
 
 # ── Comps ──────────────────────────────────────────────────────────────────────
@@ -19,6 +20,13 @@ Live web-search data may be included in the user message under the heading
 When no live data is provided, rely on your training knowledge of the local
 market to produce plausible estimates and note the source as "AI estimate".
 
+CRITICAL REQUIREMENT — THE COMPARABLE SALES TABLE MUST ALWAYS CONTAIN EXACTLY
+5 DATA ROWS (rows 1 through 5). This is non-negotiable:
+- If the web search data contains fewer than 5 sold listings, fill the remaining
+  rows using your training knowledge of comparable properties in the same area.
+- Never leave a row as "..." or skip a row number.
+- Never produce a table with fewer than 5 completed data rows.
+
 Produce the analysis in this exact markdown format:
 
 ## Comparable Sales Analysis — {address}
@@ -34,10 +42,10 @@ Produce the analysis in this exact markdown format:
 | # | Address | Sale Price | Sq Ft | $/Sq Ft | Distance | Days Ago | Similarity |
 |---|---------|-----------|-------|---------|----------|----------|------------|
 | 1 | [address] | $XXX,XXX | X,XXX | $XXX | X.X mi | XX | High/Med/Low |
-| 2 | ... | ... | ... | ... | ... | ... | ... |
-| 3 | ... | ... | ... | ... | ... | ... | ... |
-| 4 | ... | ... | ... | ... | ... | ... | ... |
-| 5 | ... | ... | ... | ... | ... | ... | ... |
+| 2 | [address] | $XXX,XXX | X,XXX | $XXX | X.X mi | XX | High/Med/Low |
+| 3 | [address] | $XXX,XXX | X,XXX | $XXX | X.X mi | XX | High/Med/Low |
+| 4 | [address] | $XXX,XXX | X,XXX | $XXX | X.X mi | XX | High/Med/Low |
+| 5 | [address] | $XXX,XXX | X,XXX | $XXX | X.X mi | XX | High/Med/Low |
 
 ### Adjustment Analysis
 | Adjustment Factor | Direction | Est. Impact |
@@ -133,6 +141,73 @@ class CompsTool(BaseRealEstateTool):
             + body
         )
 
+    # ── Comp-count validation ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _count_comp_rows(text: str) -> int:
+        """Count completed data rows in the Comparable Sales table.
+
+        Looks for rows that start with ``| 1 |`` through ``| 9 |`` so it is
+        robust to different column counts and formatting variations.
+        """
+        # Primary: count explicitly numbered rows (| 1 | … | 5 |)
+        numbered = re.findall(r"^\|\s*[1-9]\s*\|", text, re.MULTILINE)
+        if numbered:
+            return len(numbered)
+
+        # Fallback: find the comps section and count non-header pipe rows
+        section = re.search(
+            r"### Comparable Sales.*?(?=\n###|\Z)", text, re.DOTALL | re.IGNORECASE
+        )
+        if not section:
+            return 0
+        data_rows = [
+            ln for ln in section.group().splitlines()
+            if ln.strip().startswith("|")
+            and "---" not in ln
+            and not re.search(r"address|sale price|similarity|#", ln, re.IGNORECASE)
+        ]
+        return len(data_rows)
+
+    _FIX_SYSTEM = (
+        "You are a real estate comparable sales analyst completing an incomplete report. "
+        "The user will provide a partial comps report. Your ONLY job is to return the "
+        "complete report with exactly 5 rows in the Comparable Sales table. "
+        "Keep every other section unchanged. "
+        "Fill missing rows using your training knowledge of comparable properties "
+        "in the same area — never leave placeholder '...' values."
+    )
+
+    def _ensure_five_comps(self, output: str, address: str) -> str:
+        """If the comps table has fewer than 5 entries, fire a follow-up call
+        to fill the missing rows.  Returns the (possibly fixed) report text."""
+        found = self._count_comp_rows(output)
+        if found >= 5:
+            return output
+
+        import logging
+        logging.getLogger(__name__).warning(
+            "CompsTool: only %d comp row(s) detected for %s — requesting completion",
+            found, address,
+        )
+
+        fix_user = (
+            f"Property address: {address}\n\n"
+            f"The following comparable sales report contains only {found} of the "
+            f"required 5 comparable sales rows. "
+            f"Please add {5 - found} more rows to complete the table, "
+            f"using your knowledge of the local market. "
+            f"Return the full updated report.\n\n"
+            f"Current report:\n{output}"
+        )
+        try:
+            fixed = self._call_llm(self._FIX_SYSTEM, fix_user)
+            if self._count_comp_rows(fixed) >= found:   # accept if no worse
+                return fixed
+        except Exception:
+            pass
+        return output   # return original if the fix call fails
+
     # ── Tool entry point ──────────────────────────────────────────────────────
 
     def run(self, address: str, **kwargs) -> dict:
@@ -146,6 +221,7 @@ class CompsTool(BaseRealEstateTool):
 
         try:
             output = self._call_llm(prompt, user_msg)
+            output = self._ensure_five_comps(output, address)
             return self._success_result(address, output)
         except Exception as e:
             return self._error_result(address, str(e))

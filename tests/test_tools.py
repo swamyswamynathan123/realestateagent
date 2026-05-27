@@ -130,6 +130,97 @@ def test_comps_tool(mock_llm):
     assert result["status"] == "success"
 
 
+# ── Comp-count helpers ────────────────────────────────────────────────────────
+
+_FULL_COMPS = """\
+## Comparable Sales Analysis — 123 Main St
+
+### Comparable Sales (5 comps)
+| # | Address | Sale Price | Sq Ft | $/Sq Ft | Distance | Days Ago | Similarity |
+|---|---------|-----------|-------|---------|----------|----------|------------|
+| 1 | 100 Oak Ave | $420,000 | 1,800 | $233 | 0.3 mi | 14 | High |
+| 2 | 200 Elm St  | $405,000 | 1,750 | $231 | 0.5 mi | 30 | High |
+| 3 | 300 Pine Rd | $435,000 | 1,900 | $229 | 0.7 mi | 45 | Med  |
+| 4 | 400 Maple Dr| $398,000 | 1,700 | $234 | 1.1 mi | 60 | Med  |
+| 5 | 500 Cedar Ln| $450,000 | 1,950 | $231 | 1.4 mi | 75 | Low  |
+
+**Score:** 78/100
+"""
+
+_PARTIAL_COMPS = """\
+## Comparable Sales Analysis — 123 Main St
+
+### Comparable Sales (5 comps)
+| # | Address | Sale Price | Sq Ft | $/Sq Ft | Distance | Days Ago | Similarity |
+|---|---------|-----------|-------|---------|----------|----------|------------|
+| 1 | 100 Oak Ave | $420,000 | 1,800 | $233 | 0.3 mi | 14 | High |
+| 2 | 200 Elm St  | $405,000 | 1,750 | $231 | 0.5 mi | 30 | High |
+
+**Score:** 60/100
+"""
+
+
+def test_count_comp_rows_full():
+    from tools.property_analysis import CompsTool
+    assert CompsTool._count_comp_rows(_FULL_COMPS) == 5
+
+
+def test_count_comp_rows_partial():
+    from tools.property_analysis import CompsTool
+    assert CompsTool._count_comp_rows(_PARTIAL_COMPS) == 2
+
+
+def test_count_comp_rows_empty():
+    from tools.property_analysis import CompsTool
+    assert CompsTool._count_comp_rows("No table here.") == 0
+
+
+def test_ensure_five_comps_already_complete(mock_llm, mocker):
+    """If the output already has 5 rows, no second LLM call is made."""
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
+    from tools.property_analysis import CompsTool
+    tool = CompsTool(llm=mock_llm)
+    result = tool._ensure_five_comps(_FULL_COMPS, "123 Main St")
+    assert result == _FULL_COMPS
+    mock_llm.invoke.assert_not_called()
+
+
+def test_ensure_five_comps_triggers_fix_call(mock_llm):
+    """If fewer than 5 rows are found, a second LLM call is made to fix it."""
+    from unittest.mock import MagicMock
+    # First call (fix): return a report with 5 rows
+    fix_response = MagicMock(content=_FULL_COMPS)
+    mock_llm.invoke.return_value = fix_response
+
+    from tools.property_analysis import CompsTool
+    tool = CompsTool(llm=mock_llm)
+    result = tool._ensure_five_comps(_PARTIAL_COMPS, "123 Main St")
+
+    # The fix call must have been made
+    mock_llm.invoke.assert_called_once()
+    assert CompsTool._count_comp_rows(result) == 5
+
+
+def test_comps_tool_fix_call_on_short_output(mock_llm, monkeypatch, mocker):
+    """End-to-end: when first LLM response is sparse, a fix call tops it up."""
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
+
+    from unittest.mock import MagicMock, call
+    # First call returns only 2 rows; second (fix) call returns all 5
+    mock_llm.invoke.side_effect = [
+        MagicMock(content=_PARTIAL_COMPS),
+        MagicMock(content=_FULL_COMPS),
+    ]
+
+    from tools.property_analysis import CompsTool
+    result = CompsTool(llm=mock_llm).run("123 Main St, Austin TX")
+
+    assert result["status"] == "success"
+    assert mock_llm.invoke.call_count == 2   # initial + fix
+    assert CompsTool._count_comp_rows(result["output"]) == 5
+
+
 def test_comps_tool_no_tavily_key_no_web_data(mock_llm, monkeypatch, mocker):
     """Without a Tavily key the tool succeeds using LLM knowledge only."""
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
