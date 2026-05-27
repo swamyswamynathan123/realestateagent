@@ -169,3 +169,52 @@ def test_listing_tool(mock_llm):
     result = ListingTool(llm=mock_llm).run("123 Main St, Austin TX")
     assert result["skill"] == "listing"
     assert result["status"] == "success"
+
+
+# ── Task 8: Investment tool tests ──────────────────────────────────────────────
+
+def test_invest_tool(mock_llm):
+    from tools.investment_tools import InvestTool
+    result = InvestTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["skill"] == "invest"
+    assert result["status"] == "success"
+
+
+def test_flip_tool(mock_llm):
+    from tools.investment_tools import FlipTool
+    result = FlipTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["skill"] == "flip"
+    assert result["status"] == "success"
+
+
+def test_commercial_tool(mock_llm):
+    from tools.investment_tools import CommercialTool
+    result = CommercialTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["skill"] == "commercial"
+    assert result["status"] == "success"
+
+
+def test_analyze_tool(mock_llm):
+    from tools.investment_tools import AnalyzeTool
+    result = AnalyzeTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["skill"] == "analyze"
+    assert result["status"] == "success"
+
+
+def test_compare_tool(mock_llm):
+    from tools.investment_tools import CompareTool
+    result = CompareTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["skill"] == "compare"
+    assert result["status"] == "success"
+
+
+def test_tool_registry_has_all_skills():
+    from tools import TOOL_REGISTRY, get_tool
+    import config
+    for skill in config.ALL_SKILLS:
+        assert skill in TOOL_REGISTRY, f"Missing skill: {skill}"
+
+def test_get_tool_raises_on_unknown():
+    from tools import get_tool
+    with pytest.raises(ValueError, match="Unknown skill"):
+        get_tool("nonexistent_skill")
