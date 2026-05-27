@@ -52,6 +52,7 @@ def init_session() -> None:
         "running": False,
         "address": "",
         "openai_key": config.OPENAI_API_KEY,
+        "tavily_key": config.TAVILY_API_KEY,
         "selected_skills": list(ALL_SKILLS),
     }
     for key, val in defaults.items():
@@ -79,13 +80,15 @@ def render_sidebar() -> None:
         )
         st.session_state.openai_key = openai_key
 
-        st.text_input(
+        tavily_key = st.text_input(
             "Tavily API Key *(optional)*",
+            value=st.session_state.tavily_key,
             type="password",
             placeholder="tvly-...",
             help="Enables live web search for more accurate data.",
             key="input_tavily_key",
         )
+        st.session_state.tavily_key = tavily_key
 
         st.divider()
 
@@ -170,7 +173,7 @@ def run_analysis() -> None:
     address = st.session_state.address
     openai_key = st.session_state.openai_key
     selected_skills = st.session_state.selected_skills
-    tavily_key = st.session_state.get("input_tavily_key", "")
+    tavily_key = st.session_state.tavily_key
 
     # Set API keys at runtime (avoid global state pollution)
     os.environ["OPENAI_API_KEY"] = openai_key
