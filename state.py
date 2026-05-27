@@ -45,6 +45,10 @@ class RealEstateState(TypedDict):
     tool_results: Annotated[dict[str, str], merge_dicts]   # skill -> markdown
     errors: Annotated[dict[str, str], merge_dicts]          # skill -> error msg
 
+    # Optional user-provided property details
+    purchase_price: Optional[int]   # User-supplied sale price in dollars
+    hoa_fees: Optional[int]         # User-supplied monthly HOA fees in dollars
+
     # Control flow
     validation_passed: bool
 

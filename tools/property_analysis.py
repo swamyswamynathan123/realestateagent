@@ -108,8 +108,13 @@ class RentalTool(BaseRealEstateTool):
 
     def run(self, address: str, **kwargs) -> dict:
         prompt = self.system_prompt.replace("{address}", address)
+        user_msg = f"Property address: {address}"
+        if kwargs.get("purchase_price"):
+            user_msg += f"\nSale price: ${kwargs['purchase_price']:,}"
+        if kwargs.get("hoa_fees"):
+            user_msg += f"\nMonthly HOA fees: ${kwargs['hoa_fees']:,}/mo (use this exact figure in the cash flow table)"
         try:
-            output = self._call_llm(prompt, f"Property address: {address}")
+            output = self._call_llm(prompt, user_msg)
             return self._success_result(address, output)
         except Exception as e:
             return self._error_result(address, str(e))
@@ -154,10 +159,13 @@ class MortgageTool(BaseRealEstateTool):
 
     def run(self, address: str, **kwargs) -> dict:
         purchase_price = kwargs.get("purchase_price")
+        hoa_fees = kwargs.get("hoa_fees")
         prompt = self.system_prompt.replace("{address}", address)
         user_msg = f"Property address: {address}"
         if purchase_price:
             user_msg += f"\nEstimated purchase price: ${purchase_price:,}"
+        if hoa_fees:
+            user_msg += f"\nMonthly HOA fees: ${hoa_fees:,}/mo (include in PITI calculations)"
         try:
             output = self._call_llm(prompt, user_msg)
             return self._success_result(address, output)

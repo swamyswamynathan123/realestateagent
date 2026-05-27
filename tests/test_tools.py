@@ -148,6 +148,44 @@ def test_mortgage_tool_with_price(mock_llm):
     assert "400,000" in user_message
 
 
+def test_rental_tool_with_price_and_hoa(mock_llm):
+    from tools.property_analysis import RentalTool
+    result = RentalTool(llm=mock_llm).run("123 Main St, Austin TX", purchase_price=350000, hoa_fees=250)
+    assert result["status"] == "success"
+    call_args = mock_llm.invoke.call_args
+    user_message = call_args[0][0][-1].content
+    assert "350,000" in user_message
+    assert "250" in user_message
+
+
+def test_mortgage_tool_with_price_and_hoa(mock_llm):
+    from tools.property_analysis import MortgageTool
+    result = MortgageTool(llm=mock_llm).run("123 Main St, Austin TX", purchase_price=400000, hoa_fees=300)
+    assert result["status"] == "success"
+    call_args = mock_llm.invoke.call_args
+    user_message = call_args[0][0][-1].content
+    assert "400,000" in user_message
+    assert "300" in user_message
+
+
+def test_invest_tool_with_price(mock_llm):
+    from tools.investment_tools import InvestTool
+    result = InvestTool(llm=mock_llm).run("123 Main St, Austin TX", purchase_price=500000)
+    assert result["status"] == "success"
+    call_args = mock_llm.invoke.call_args
+    user_message = call_args[0][0][-1].content
+    assert "500,000" in user_message
+
+
+def test_flip_tool_with_price(mock_llm):
+    from tools.investment_tools import FlipTool
+    result = FlipTool(llm=mock_llm).run("123 Main St, Austin TX", purchase_price=275000)
+    assert result["status"] == "success"
+    call_args = mock_llm.invoke.call_args
+    user_message = call_args[0][0][-1].content
+    assert "275,000" in user_message
+
+
 # ── Task 7: Location & market tool tests ───────────────────────────────────────
 
 def test_neighborhood_tool(mock_llm):

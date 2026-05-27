@@ -51,8 +51,11 @@ class InvestTool(BaseRealEstateTool):
 
     def run(self, address: str, **kwargs) -> dict:
         prompt = self.system_prompt.replace("{address}", address)
+        user_msg = f"Property address: {address}"
+        if kwargs.get("purchase_price"):
+            user_msg += f"\nSale price: ${kwargs['purchase_price']:,}"
         try:
-            output = self._call_llm(prompt, f"Property address: {address}")
+            output = self._call_llm(prompt, user_msg)
             return self._success_result(address, output)
         except Exception as e:
             return self._error_result(address, str(e))
@@ -105,8 +108,11 @@ class FlipTool(BaseRealEstateTool):
 
     def run(self, address: str, **kwargs) -> dict:
         prompt = self.system_prompt.replace("{address}", address)
+        user_msg = f"Property address: {address}"
+        if kwargs.get("purchase_price"):
+            user_msg += f"\nSale price / purchase price: ${kwargs['purchase_price']:,} (use as the purchase price in deal numbers)"
         try:
-            output = self._call_llm(prompt, f"Property address: {address}")
+            output = self._call_llm(prompt, user_msg)
             return self._success_result(address, output)
         except Exception as e:
             return self._error_result(address, str(e))

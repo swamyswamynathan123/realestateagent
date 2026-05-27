@@ -54,6 +54,8 @@ def init_session() -> None:
         "openai_key": config.OPENAI_API_KEY,
         "tavily_key": config.TAVILY_API_KEY,
         "selected_skills": list(ALL_SKILLS),
+        "purchase_price": 0,
+        "hoa_fees": 0,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -101,6 +103,34 @@ def render_sidebar() -> None:
             key="input_address",
         )
         st.session_state.address = address
+
+        # Optional property details
+        st.caption("*(Optional)* Known property details improve accuracy:")
+        col_price, col_hoa = st.columns(2)
+        with col_price:
+            purchase_price = st.number_input(
+                "Sale Price ($)",
+                min_value=0,
+                max_value=100_000_000,
+                value=st.session_state.purchase_price,
+                step=1000,
+                help="Enter the listed or agreed sale price. Leave 0 to let AI estimate.",
+                key="input_purchase_price",
+                format="%d",
+            )
+            st.session_state.purchase_price = purchase_price
+        with col_hoa:
+            hoa_fees = st.number_input(
+                "HOA Fees ($/mo)",
+                min_value=0,
+                max_value=10_000,
+                value=st.session_state.hoa_fees,
+                step=25,
+                help="Monthly HOA fees. Leave 0 if none or unknown.",
+                key="input_hoa_fees",
+                format="%d",
+            )
+            st.session_state.hoa_fees = hoa_fees
 
         st.divider()
 
@@ -174,6 +204,8 @@ def run_analysis() -> None:
     openai_key = st.session_state.openai_key
     selected_skills = st.session_state.selected_skills
     tavily_key = st.session_state.tavily_key
+    purchase_price = st.session_state.purchase_price or None   # 0 → None (not provided)
+    hoa_fees = st.session_state.hoa_fees or None               # 0 → None (not provided)
 
     # Set API keys at runtime (avoid global state pollution)
     os.environ["OPENAI_API_KEY"] = openai_key
@@ -190,6 +222,8 @@ def run_analysis() -> None:
         "parsed_data": {},
         "tool_results": {},
         "errors": {},
+        "purchase_price": purchase_price,
+        "hoa_fees": hoa_fees,
         "validation_passed": False,
         "final_report": "",
         "pdf_path": None,

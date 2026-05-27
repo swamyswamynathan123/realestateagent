@@ -32,9 +32,15 @@ logger = logging.getLogger(__name__)
 def _run_tool(skill_name: str, state: RealEstateState) -> dict:
     """Invoke a named tool and return the appropriate state delta."""
     address = state["address"]
+    # Forward user-supplied property details to every tool as optional kwargs
+    kwargs: dict = {}
+    if state.get("purchase_price"):
+        kwargs["purchase_price"] = state["purchase_price"]
+    if state.get("hoa_fees"):
+        kwargs["hoa_fees"] = state["hoa_fees"]
     try:
         tool = get_tool(skill_name)
-        result = tool.run(address)
+        result = tool.run(address, **kwargs)
         if result["status"] == "error":
             return {
                 "errors": {skill_name: result.get("error", "Unknown error")},
@@ -76,7 +82,7 @@ def run_screen(state: RealEstateState) -> dict:
     address = state["address"]
     try:
         tool = get_tool("screen")
-        result = tool.run(address)
+        result = tool.run(address)  # screen is validation-only; no price kwargs needed
         passed = result.get("validation_passed", True)
         delta: dict = {
             "validation_passed": passed,
