@@ -357,7 +357,8 @@ def render_sidebar() -> None:
             help="Enter a full US property address including city and state.",
             key="input_address",
         )
-        st.session_state.address = st.session_state.input_address
+        address = st.session_state.input_address
+        st.session_state.address = address
 
         # Optional property details
         st.caption("*(Optional)* Known property details improve accuracy:")
