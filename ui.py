@@ -92,6 +92,22 @@ def render_sidebar() -> None:
         )
         st.session_state.tavily_key = tavily_key
 
+        # Cache status + clear button
+        if config.LLM_CACHE_ENABLED:
+            try:
+                from langchain_core.globals import get_llm_cache
+                llm_cache = get_llm_cache()
+                if llm_cache is not None:
+                    n = llm_cache.size()
+                    col_cache, col_clear = st.columns([2, 1])
+                    col_cache.caption(f"💾 Cache: {n} entr{'y' if n == 1 else 'ies'}")
+                    if col_clear.button("Clear", key="btn_clear_cache", use_container_width=True):
+                        llm_cache.clear()
+                        st.toast("Cache cleared", icon="🗑️")
+                        st.rerun()
+            except Exception:
+                pass
+
         st.divider()
 
         # Address

@@ -2,10 +2,13 @@
 config.py — environment variables and LLM settings.
 Load this before importing any tool or graph module.
 """
+import logging
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # ── OpenAI ────────────────────────────────────────────────────────────────────
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
@@ -19,6 +22,12 @@ USE_WEB_SEARCH: bool = bool(TAVILY_API_KEY)
 
 # ── PDF ───────────────────────────────────────────────────────────────────────
 PDF_OUTPUT_DIR: str = os.getenv("PDF_OUTPUT_DIR", "reports")
+
+# ── LLM caching ───────────────────────────────────────────────────────────────
+# Responses are cached by (prompt, llm_string) key so re-running the same
+# address skips the OpenAI API entirely.  Disable with LLM_CACHE_ENABLED=false.
+LLM_CACHE_ENABLED: bool = os.getenv("LLM_CACHE_ENABLED", "true").lower() == "true"
+LLM_CACHE_DB: str = os.getenv("LLM_CACHE_DB", ".langchain_cache.db")
 
 # ── Skills registry ───────────────────────────────────────────────────────────
 # Parallel skills — run after validation (quick + screen)
@@ -47,3 +56,26 @@ SKILL_LABELS: dict[str, str] = {
     "compare":      "Property Comparison",
     "listing":      "MLS Listing Description",
 }
+
+
+# ── Cache initialisation ───────────────────────────────────────────────────────
+
+def setup_llm_cache() -> None:
+    """Register the SQLite LLM cache with LangChain's global registry.
+
+    Called once at import time.  Tools instantiated later automatically
+    inherit the cache — no changes needed in tool code.
+    """
+    if not LLM_CACHE_ENABLED:
+        logger.debug("LLM caching disabled via LLM_CACHE_ENABLED=false")
+        return
+    try:
+        from langchain_core.globals import set_llm_cache
+        from cache import SQLiteCache
+        set_llm_cache(SQLiteCache(db_path=LLM_CACHE_DB))
+        logger.debug("LLM cache active: %s", LLM_CACHE_DB)
+    except Exception:
+        logger.exception("Failed to initialise LLM cache — proceeding without caching")
+
+
+setup_llm_cache()
