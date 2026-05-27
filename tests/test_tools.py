@@ -72,3 +72,50 @@ def test_score_to_grade(mock_llm):
     assert tool._score_to_grade(30) == "D"
     assert tool._score_to_grade(10) == "F"
     assert tool._score_to_grade(None) is None
+
+
+# ── Task 5: Validation tool tests ──────────────────────────────────────────────
+
+def test_quick_tool_returns_success(mock_llm):
+    from tools.validation import QuickTool
+    tool = QuickTool(llm=mock_llm)
+    result = tool.run("123 Main St, Austin TX")
+    assert result["skill"] == "quick"
+    assert result["status"] == "success"
+    assert len(result["output"]) > 10
+
+
+def test_quick_tool_returns_error_on_llm_failure(mock_llm):
+    mock_llm.invoke.side_effect = Exception("rate limit")
+    from tools.validation import QuickTool
+    tool = QuickTool(llm=mock_llm)
+    result = tool.run("123 Main St, Austin TX")
+    assert result["status"] == "error"
+    assert "rate limit" in result["error"]
+
+
+def test_screen_tool_returns_success(mock_llm):
+    from tools.validation import ScreenTool
+    tool = ScreenTool(llm=mock_llm)
+    result = tool.run("123 Main St, Austin TX")
+    assert result["skill"] == "screen"
+    assert result["status"] == "success"
+    assert "validation_passed" in result
+
+
+def test_screen_tool_sets_validation_passed_true(mock_llm):
+    from tools.validation import ScreenTool
+    tool = ScreenTool(llm=mock_llm)
+    result = tool.run("123 Main St, Austin TX")
+    # mock returns "# Mock Analysis..." which does NOT start with VALIDATION_FAILED
+    assert result["validation_passed"] is True
+
+
+def test_screen_tool_detects_validation_failed(mock_llm):
+    mock_llm.invoke.return_value = MagicMock(
+        content="VALIDATION_FAILED: Address not recognizable."
+    )
+    from tools.validation import ScreenTool
+    tool = ScreenTool(llm=mock_llm)
+    result = tool.run("asdfghjkl")
+    assert result["validation_passed"] is False
