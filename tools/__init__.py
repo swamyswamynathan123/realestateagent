@@ -5,6 +5,7 @@ from tools.validation import QuickTool, ScreenTool
 from tools.property_analysis import CompsTool, RentalTool, MortgageTool
 from tools.location_tools import NeighborhoodTool, MarketTool, ListingTool
 from tools.investment_tools import InvestTool, FlipTool, CommercialTool, AnalyzeTool, CompareTool
+from tools.additional_tools import STRTool, PropertyTaxTool
 
 TOOL_REGISTRY: dict[str, type] = {
     "quick":        QuickTool,
@@ -20,6 +21,8 @@ TOOL_REGISTRY: dict[str, type] = {
     "commercial":   CommercialTool,
     "analyze":      AnalyzeTool,
     "compare":      CompareTool,
+    "str":          STRTool,
+    "tax":          PropertyTaxTool,
 }
 
 

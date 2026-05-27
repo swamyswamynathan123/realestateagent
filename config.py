@@ -35,6 +35,7 @@ PARALLEL_SKILLS: list[str] = [
     "comps", "rental", "neighborhood", "mortgage",
     "market", "commercial", "flip", "invest",
     "analyze", "compare", "listing",
+    "str", "tax",
 ]
 
 # All skills in execution order
@@ -42,19 +43,21 @@ ALL_SKILLS: list[str] = ["quick", "screen"] + PARALLEL_SKILLS
 
 # Skill display names for UI
 SKILL_LABELS: dict[str, str] = {
-    "quick":        "Quick Snapshot",
-    "screen":       "Property Screen",
-    "comps":        "Comparable Sales",
-    "rental":       "Rental & Cash Flow",
-    "neighborhood": "Neighborhood Analysis",
-    "mortgage":     "Mortgage Calculator",
-    "market":       "Market Conditions",
-    "commercial":   "Commercial Analysis",
-    "flip":         "Fix & Flip Analysis",
-    "invest":       "Investment Strategies",
-    "analyze":      "Full Property Analysis",
-    "compare":      "Property Comparison",
-    "listing":      "MLS Listing Description",
+    "quick":        "⚡ Quick Snapshot",
+    "screen":       "📋 Property Screen",
+    "comps":        "📊 Comparable Sales",
+    "rental":       "🏠 Rental & Cash Flow",
+    "neighborhood": "🏘️ Neighborhood Analysis",
+    "mortgage":     "💰 Mortgage Calculator",
+    "market":       "📈 Market Conditions",
+    "commercial":   "🏢 Commercial Analysis",
+    "flip":         "🔨 Fix & Flip Analysis",
+    "invest":       "💼 Investment Strategies",
+    "analyze":      "🔍 Full Property Analysis",
+    "compare":      "⚖️ Property Comparison",
+    "listing":      "📝 MLS Listing Description",
+    "str":          "🏖️ STR / Airbnb Analysis",
+    "tax":          "🧾 Property Tax",
 }
 
 

@@ -486,3 +486,115 @@ def test_get_tool_raises_on_unknown():
     from tools import get_tool
     with pytest.raises(ValueError, match="Unknown skill"):
         get_tool("nonexistent_skill")
+
+
+# ── Additional tools: STR + Property Tax ───────────────────────────────────────
+
+def test_str_tool_returns_success(mock_llm, monkeypatch, mocker):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
+    from tools.additional_tools import STRTool
+    result = STRTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["skill"] == "str"
+    assert result["status"] == "success"
+    assert len(result["output"]) > 10
+
+
+def test_str_tool_with_purchase_price(mock_llm, monkeypatch, mocker):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
+    from tools.additional_tools import STRTool
+    result = STRTool(llm=mock_llm).run("123 Main St, Austin TX", purchase_price=450000)
+    assert result["status"] == "success"
+    user_msg = mock_llm.invoke.call_args[0][0][-1].content
+    assert "450,000" in user_msg
+
+
+def test_str_tool_with_hoa_fees(mock_llm, monkeypatch, mocker):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
+    from tools.additional_tools import STRTool
+    result = STRTool(llm=mock_llm).run("123 Main St, Austin TX", purchase_price=400000, hoa_fees=300)
+    assert result["status"] == "success"
+    user_msg = mock_llm.invoke.call_args[0][0][-1].content
+    assert "300" in user_msg
+
+
+def test_str_tool_injects_tavily_results(mock_llm, monkeypatch, mocker):
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-key")
+    fake_results = {
+        "results": [
+            {
+                "title": "Airbnb Austin TX — Average nightly rate $175",
+                "content": "Austin STR market: avg nightly $175, occupancy 72%, RevPAN $126",
+                "url": "https://www.airdna.co/austin",
+            }
+        ]
+    }
+    mocker.patch("tavily.TavilyClient.search", return_value=fake_results)
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
+    from tools.additional_tools import STRTool
+    result = STRTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["status"] == "success"
+    user_msg = mock_llm.invoke.call_args[0][0][-1].content
+    assert "🌐 Live STR Data" in user_msg
+
+
+def test_str_tool_error_handling(mock_llm, monkeypatch, mocker):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
+    mock_llm.invoke.side_effect = Exception("API error")
+    from tools.additional_tools import STRTool
+    result = STRTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["status"] == "error"
+    assert "API error" in result["error"]
+
+
+def test_tax_tool_returns_success(mock_llm, monkeypatch, mocker):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
+    from tools.additional_tools import PropertyTaxTool
+    result = PropertyTaxTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["skill"] == "tax"
+    assert result["status"] == "success"
+    assert len(result["output"]) > 10
+
+
+def test_tax_tool_with_purchase_price(mock_llm, monkeypatch, mocker):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
+    from tools.additional_tools import PropertyTaxTool
+    result = PropertyTaxTool(llm=mock_llm).run("123 Main St, Austin TX", purchase_price=500000)
+    assert result["status"] == "success"
+    user_msg = mock_llm.invoke.call_args[0][0][-1].content
+    assert "500,000" in user_msg
+
+
+def test_tax_tool_injects_tavily_results(mock_llm, monkeypatch, mocker):
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-key")
+    fake_results = {
+        "results": [
+            {
+                "title": "Travis County TX Property Tax Rate 2024",
+                "content": "Travis County effective tax rate 1.80%. Homestead exemption $25,000.",
+                "url": "https://www.smartasset.com/taxes/travis-county-property-tax",
+            }
+        ]
+    }
+    mocker.patch("tavily.TavilyClient.search", return_value=fake_results)
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
+    from tools.additional_tools import PropertyTaxTool
+    result = PropertyTaxTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["status"] == "success"
+    user_msg = mock_llm.invoke.call_args[0][0][-1].content
+    assert "🌐 Live Tax Data" in user_msg
+
+
+def test_tax_tool_error_handling(mock_llm, monkeypatch, mocker):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    mocker.patch("tools.base.BaseRealEstateTool._get_search_cache", return_value=None)
+    mock_llm.invoke.side_effect = Exception("timeout")
+    from tools.additional_tools import PropertyTaxTool
+    result = PropertyTaxTool(llm=mock_llm).run("123 Main St, Austin TX")
+    assert result["status"] == "error"
+    assert "timeout" in result["error"]

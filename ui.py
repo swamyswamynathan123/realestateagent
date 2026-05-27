@@ -36,6 +36,7 @@ def configure_page() -> None:
         padding: 12px;
         border: 1px solid #e0e0e0;
     }
+    .quick-link-btn { margin: 2px 0; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -61,6 +62,10 @@ def init_session() -> None:
         # None = not attempted; False = attempted but failed; (lat,lon) = success
         "map_coords": None,
         "map_address": "",
+        # Chat with Report
+        "chat_messages": [],     # list of {"role": "user"|"assistant", "content": str}
+        # Report history — list of recent reports loaded from DB
+        "history_loaded": False,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -218,9 +223,69 @@ def render_sidebar() -> None:
             st.session_state.tool_results = {}
             st.session_state.errors = {}
             st.session_state.progress_log = []
+            st.session_state.chat_messages = []   # reset chat for new address
             # Reset map so it re-geocodes for the new address
             st.session_state.map_coords = None
             st.session_state.map_address = ""
+            st.rerun()
+
+        st.divider()
+
+        # ── Report History ─────────────────────────────────────────────────────
+        _render_history_sidebar()
+
+
+def _render_history_sidebar() -> None:
+    """Show recent analyses in the sidebar with load/delete buttons."""
+    try:
+        from history import list_reports, load_report, delete_report, clear_history
+    except ImportError:
+        return
+
+    with st.expander("📚 Report History", expanded=False):
+        try:
+            reports = list_reports(limit=10)
+        except Exception:
+            st.caption("History unavailable.")
+            return
+
+        if not reports:
+            st.caption("No saved reports yet.")
+            return
+
+        for r in reports:
+            ts_short = r["timestamp"][:16]   # "YYYY-MM-DD HH:MM"
+            addr_short = r["address"][:35] + ("…" if len(r["address"]) > 35 else "")
+            avg_score = ""
+            if r["scores"]:
+                vals = list(r["scores"].values())
+                avg = int(sum(vals) / len(vals))
+                avg_score = f" · {avg}/100"
+
+            col_load, col_del = st.columns([4, 1])
+            with col_load:
+                if st.button(
+                    f"📄 {addr_short}\n{ts_short}{avg_score}",
+                    key=f"hist_load_{r['id']}",
+                    use_container_width=True,
+                ):
+                    full = load_report(r["id"])
+                    if full:
+                        st.session_state.address = full["address"]
+                        st.session_state.report_markdown = full["report_markdown"]
+                        st.session_state.tool_results = full["tool_results"]
+                        st.session_state.errors = {}
+                        st.session_state.chat_messages = []
+                        st.session_state.map_coords = None
+                        st.session_state.map_address = ""
+                        st.rerun()
+            with col_del:
+                if st.button("🗑", key=f"hist_del_{r['id']}", help="Delete this report"):
+                    delete_report(r["id"])
+                    st.rerun()
+
+        if st.button("Clear All History", key="hist_clear", use_container_width=True):
+            clear_history()
             st.rerun()
 
 
@@ -293,6 +358,9 @@ def run_analysis() -> None:
             progress_bar.progress(100, text="✅ Complete!")
             status_ctx.update(label="✅ Analysis complete!", state="complete")
 
+            # ── Save to history ────────────────────────────────────────────────
+            _save_to_history(address)
+
         except Exception as e:
             progress_bar.empty()
             status_ctx.update(label="❌ Analysis failed", state="error")
@@ -302,30 +370,30 @@ def run_analysis() -> None:
     st.session_state.running = False
 
 
+def _save_to_history(address: str) -> None:
+    """Persist completed analysis to SQLite history."""
+    try:
+        from history import save_report
+        report_md = st.session_state.get("report_markdown") or ""
+        tool_results = st.session_state.get("tool_results") or {}
+        if report_md and tool_results:
+            save_report(address, report_md, tool_results)
+    except Exception:
+        logger.debug("History save failed (non-fatal)", exc_info=True)
+
+
 # ── Location map ───────────────────────────────────────────────────────────────
 
 def render_map(address: str) -> None:
-    """Display an interactive OpenStreetMap tile centred on the property address.
-
-    Geocoding is performed once per address and cached in session state so
-    repeated Streamlit reruns don't fire extra HTTP requests.
-
-    Session-state keys:
-      map_coords  — (lat, lon) tuple on success, False when geocoding was
-                    attempted and failed (avoids retrying on every rerun),
-                    None when not yet attempted.
-      map_address — address string for which map_coords was last computed.
-    """
+    """Display an interactive OpenStreetMap tile centred on the property address."""
     import pandas as pd
 
     cached_coords = st.session_state.get("map_coords")   # None / False / (lat,lon)
     cached_addr   = st.session_state.get("map_address", "")
 
-    # Re-geocode only when the address has changed or no attempt has been made yet
     if cached_addr != address or cached_coords is None:
         with st.spinner("📍 Locating property on map…"):
             result = geocode_address(address)
-        # Store False (not None) so we know a failed lookup was already attempted
         st.session_state.map_coords  = result if result is not None else False
         st.session_state.map_address = address
         cached_coords = st.session_state.map_coords
@@ -342,7 +410,6 @@ def render_map(address: str) -> None:
 
         lat, lon = cached_coords
         df = pd.DataFrame({"lat": [lat], "lon": [lon]})
-
         st.map(df, zoom=14, use_container_width=True)
         st.caption(
             f"📍 **{address}** &nbsp;·&nbsp; "
@@ -351,14 +418,200 @@ def render_map(address: str) -> None:
         )
 
 
+# ── Property Quick Links ───────────────────────────────────────────────────────
+
+def render_quick_links(address: str) -> None:
+    """Render external property link buttons (Zillow, Redfin, Realtor, Google Maps)."""
+    from urllib.parse import quote_plus
+    enc = quote_plus(address)
+
+    zillow_url   = f"https://www.zillow.com/homes/{enc}_rb/"
+    redfin_url   = f"https://www.redfin.com/search#location={enc}"
+    realtor_url  = f"https://www.realtor.com/realestateandforsale/{enc}"
+    maps_url     = f"https://www.google.com/maps/search/{enc}"
+
+    with st.expander("🔗 Property Quick Links", expanded=False):
+        c1, c2, c3, c4 = st.columns(4)
+        c1.link_button("🏠 Zillow",       zillow_url,  use_container_width=True)
+        c2.link_button("🔴 Redfin",       redfin_url,  use_container_width=True)
+        c3.link_button("🏡 Realtor.com",  realtor_url, use_container_width=True)
+        c4.link_button("🗺️ Google Maps",  maps_url,    use_container_width=True)
+
+
+# ── Street View ────────────────────────────────────────────────────────────────
+
+def render_street_view(address: str) -> None:
+    """Embed a Google Street View iframe for the property."""
+    from urllib.parse import quote_plus
+    enc = quote_plus(address)
+    # Google Maps embed (no API key required for the basic embed)
+    embed_url = (
+        "https://www.google.com/maps/embed/v1/streetview"
+        f"?key=AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY"  # public demo key
+        f"&location={enc}&heading=210&pitch=10&fov=75"
+    )
+    # Fallback: use the standard maps search embed (works without API key)
+    fallback_url = (
+        f"https://maps.google.com/maps?q={enc}"
+        "&output=embed&z=16&layer=c&cbll=0,0&cbp=12,0,,0,0"
+    )
+
+    with st.expander("🏘️ Street View", expanded=False):
+        st.markdown(
+            f"""<iframe
+                width="100%" height="300"
+                src="https://www.google.com/maps/embed/v1/place?key=AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY&q={enc}&zoom=16"
+                style="border:0; border-radius:8px;"
+                allowfullscreen="" loading="lazy"
+                referrerpolicy="no-referrer-when-downgrade">
+            </iframe>""",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Map data © Google. Street View availability varies by location. "
+            "[Open in Google Maps]"
+            f"(https://www.google.com/maps/search/{enc})"
+        )
+
+
+# ── Charts ─────────────────────────────────────────────────────────────────────
+
+def render_charts(tool_results: dict, address: str) -> None:
+    """Render the Score Dashboard and Financial Charts tabs."""
+    try:
+        import plotly.graph_objects as go
+        import charts as ch
+    except ImportError:
+        st.info("Install plotly (`pip install plotly`) to enable interactive charts.")
+        return
+
+    tab_radar, tab_cashflow, tab_comps = st.tabs(
+        ["🎯 Score Dashboard", "💵 Cash Flow", "📊 Comp Prices"]
+    )
+
+    with tab_radar:
+        fig = ch.score_radar(tool_results, address)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+            # Score table
+            import re
+            scores = {}
+            for skill, md in tool_results.items():
+                m = re.search(r"(?:score[:\s]+)?(\d{1,3})\s*/?\s*100", md, re.I)
+                if m:
+                    v = int(m.group(1))
+                    if 0 <= v <= 100:
+                        scores[skill] = v
+            if scores:
+                avg = int(sum(scores.values()) / len(scores))
+                cols = st.columns(min(len(scores), 5))
+                items = sorted(scores.items(), key=lambda x: -x[1])
+                for i, (skill, score) in enumerate(items):
+                    grade = (
+                        "A+" if score >= 85 else
+                        "A"  if score >= 70 else
+                        "B"  if score >= 55 else
+                        "C"  if score >= 40 else
+                        "D"  if score >= 25 else "F"
+                    )
+                    label = SKILL_LABELS.get(skill, skill).lstrip("⚡📋📊🏠🏘️💰📈🏢🔨💼🔍⚖️📝🏖️🧾 ")
+                    cols[i % len(cols)].metric(label, f"{score}/100", grade)
+                st.metric("🏆 Average Score", f"{avg}/100")
+        else:
+            st.info("No scored results yet. Generate a report to see the dashboard.")
+
+    with tab_cashflow:
+        fig = ch.cashflow_waterfall(tool_results)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(
+                "Cash flow breakdown parsed from the Rental & Cash Flow analysis. "
+                "Negative bars are expenses; the final bar is net monthly cash flow."
+            )
+        else:
+            st.info("Run the Rental & Cash Flow analysis to see this chart.")
+
+    with tab_comps:
+        fig = ch.comp_prices_bar(tool_results)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(
+                "Comparable sale prices parsed from the Comparable Sales analysis."
+            )
+        else:
+            st.info("Run the Comparable Sales analysis to see this chart.")
+
+
+# ── Chat with Report ───────────────────────────────────────────────────────────
+
+def render_chat(report_md: str, openai_key: str) -> None:
+    """Let users ask questions about the generated report via GPT."""
+    with st.expander("💬 Chat with Report", expanded=False):
+        if not report_md:
+            st.info("Generate a report first, then ask questions about it here.")
+            return
+
+        if not openai_key.strip():
+            st.info("Enter your OpenAI API key in the sidebar to use chat.")
+            return
+
+        # Display existing chat history
+        for msg in st.session_state.chat_messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        # Chat input
+        user_input = st.chat_input("Ask a question about this property…")
+        if user_input:
+            st.session_state.chat_messages.append({"role": "user", "content": user_input})
+            with st.chat_message("user"):
+                st.markdown(user_input)
+
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking…"):
+                    reply = _chat_with_report(report_md, user_input, openai_key)
+                st.markdown(reply)
+            st.session_state.chat_messages.append({"role": "assistant", "content": reply})
+
+
+def _chat_with_report(report_md: str, question: str, openai_key: str) -> str:
+    """Call OpenAI to answer a question grounded in the report."""
+    try:
+        from langchain_openai import ChatOpenAI
+        from langchain_core.messages import SystemMessage, HumanMessage
+
+        # Truncate report to stay within context limits
+        MAX_REPORT_CHARS = 12_000
+        truncated = report_md[:MAX_REPORT_CHARS]
+        if len(report_md) > MAX_REPORT_CHARS:
+            truncated += "\n\n*[report truncated for chat context]*"
+
+        system = (
+            "You are a real estate expert assistant. "
+            "The user has generated an AI property analysis report and wants to ask questions about it. "
+            "Answer concisely and accurately, citing specific numbers from the report when available. "
+            "If the answer is not in the report, say so honestly rather than guessing."
+        )
+        user_msg = f"""## Property Report\n\n{truncated}\n\n---\n\n## Question\n{question}"""
+
+        os.environ["OPENAI_API_KEY"] = openai_key
+        llm = ChatOpenAI(model=config.OPENAI_MODEL, temperature=0.2, max_tokens=600)
+        response = llm.invoke([SystemMessage(content=system), HumanMessage(content=user_msg)])
+        return response.content
+    except Exception as e:
+        logger.warning("Chat LLM call failed: %s", e)
+        return f"⚠️ Could not get a response: {e}"
+
+
 # ── Results display ────────────────────────────────────────────────────────────
 
 def render_results() -> None:
-    """Render analysis results: metrics, PDF download, and tabbed skill outputs."""
+    """Render analysis results: metrics, charts, map, quick links, street view, tabs, chat."""
     tool_results: dict = st.session_state.tool_results
     errors: dict = st.session_state.errors
     report_md: Optional[str] = st.session_state.report_markdown
     pdf_path: Optional[str] = st.session_state.pdf_path
+    address: str = st.session_state.address
 
     if not tool_results and not report_md:
         # Welcome state
@@ -380,13 +633,15 @@ def render_results() -> None:
         | 🏢 Commercial Analysis | NOI, cap rate, lease terms |
         | ⚖️ Property Comparison | Subject vs 2 alternatives |
         | 📝 MLS Listing | 4 buyer-profile descriptions |
+        | 🏖️ STR / Airbnb | Nightly rates, regulations, STR vs LTR |
+        | 🧾 Property Tax | County rates, exemptions, appeal analysis |
         | 🔍 Full Property Analysis | Composite score & 90-day action plan |
 
         *Powered by OpenAI GPT-4o-mini. For educational purposes only — not financial advice.*
         """)
         return
 
-    # Metrics row
+    # ── Metrics row ────────────────────────────────────────────────────────────
     n_success = len(tool_results)
     n_error = len(errors)
     c1, c2, c3 = st.columns(3)
@@ -411,12 +666,27 @@ def render_results() -> None:
             use_container_width=True,
         )
 
-    # Location map — shown once results are available
-    render_map(st.session_state.address)
+    # ── Interactive Charts ──────────────────────────────────────────────────────
+    if tool_results:
+        render_charts(tool_results, address)
 
     st.divider()
 
-    # Build tab list: Full Report first, then individual skills, then Errors
+    # ── Location map ───────────────────────────────────────────────────────────
+    if address:
+        render_map(address)
+
+    # ── Property quick links ───────────────────────────────────────────────────
+    if address:
+        render_quick_links(address)
+
+    # ── Street View ───────────────────────────────────────────────────────────
+    if address:
+        render_street_view(address)
+
+    st.divider()
+
+    # ── Build tab list: Full Report first, then individual skills, then Errors ──
     tab_labels = ["📄 Full Report"]
     for skill in tool_results:
         tab_labels.append(SKILL_LABELS.get(skill, skill))
@@ -443,6 +713,11 @@ def render_results() -> None:
             for skill, msg in errors.items():
                 label = SKILL_LABELS.get(skill, skill)
                 st.error(f"**{label}**: {msg}")
+
+    # ── Chat with Report ───────────────────────────────────────────────────────
+    if report_md:
+        st.divider()
+        render_chat(report_md, st.session_state.openai_key)
 
 
 # ── Progress log ───────────────────────────────────────────────────────────────

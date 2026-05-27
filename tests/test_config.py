@@ -5,7 +5,7 @@ def test_config_defaults():
     assert config.ALL_SKILLS == [
         "quick", "screen", "comps", "rental", "neighborhood",
         "mortgage", "market", "commercial", "flip", "invest",
-        "analyze", "compare", "listing",
+        "analyze", "compare", "listing", "str", "tax",
     ]
 
 def test_parallel_skills_subset_of_all():
