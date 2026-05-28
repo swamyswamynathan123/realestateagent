@@ -672,58 +672,43 @@ def render_map(address: str) -> None:
 
 # ── Property Quick Links ───────────────────────────────────────────────────────
 
-def _realtor_slug(address: str) -> str:
-    """Build a Realtor.com path slug from a US address string.
+def _strip_unit(address: str) -> str:
+    """Remove unit designators from an address string.
 
-    '123 Main St #C40, Austin, TX 78701' → '123-Main-St_Austin_TX'
+    '747 Seneca St #C40, Ventura, CA' → '747 Seneca St, Ventura, CA'
 
-    Rules:
-      - Strip ZIP code
-      - Strip unit designators (#N, Apt N, Unit N, Ste N, Suite N) — Realtor.com
-        never includes them in the URL path; omitting them gives broader results
-      - Replace spaces with hyphens within each comma-separated part
-      - Join parts with underscores
+    Used for sites whose search/routing breaks on unit numbers (#, Apt, Unit, Ste).
     """
     import re
-    # Drop ZIP code
-    addr = re.sub(r",?\s*\d{5}(-\d{4})?\s*$", "", address).strip()
-    # Split on commas
-    parts = [p.strip() for p in addr.split(",") if p.strip()]
-    clean = []
-    for i, part in enumerate(parts):
-        if i == 0:
-            # Street part — strip unit designators before hyphenating
-            part = re.sub(
-                r"\s+(#\S+|[Aa]pt\.?\s*\S+|[Uu]nit\s+\S+|[Ss]te\.?\s*\S+|[Ss]uite\s+\S+)",
-                "",
-                part,
-            ).strip()
-        clean.append(part.replace(" ", "-"))
-    return "_".join(clean)
+    return re.sub(
+        r"\s+(?:#\S+|[Aa]pt\.?\s*\S+|[Uu]nit\s+\S+|[Ss]te\.?\s*\S+|[Ss]uite\s+\S+)",
+        "",
+        address,
+    ).strip()
 
 
 def render_quick_links(address: str) -> None:
-    """Render external property link buttons (Zillow, Redfin, Realtor, Google Maps)."""
-    from urllib.parse import quote
+    """Render external property link buttons (Zillow, Redfin, Trulia, Google Maps)."""
+    from urllib.parse import quote, quote_plus
 
-    # quote(safe="") encodes everything including # → %23 and space → %20.
-    # %20 is correct for both URL path segments and query-param values.
-    # Never use quote_plus here: '+' is only valid in application/x-www-form-urlencoded,
-    # not in URL paths or hash fragments.
-    enc = quote(address, safe="")
+    enc          = quote(address, safe="")          # %20 — path segments & Maps
+    enc_plus     = quote_plus(_strip_unit(address)) # + encoding, unit stripped — Redfin hash
+    enc_no_unit  = quote(_strip_unit(address), safe="")  # %20, unit stripped — Trulia path
 
-    # Zillow: path search — works with %20-encoded address
+    # Zillow: path-based search with %20 encoding
     zillow_url  = f"https://www.zillow.com/homes/{enc}/"
 
-    # Redfin: ?location= query param with %20 encoding.
-    # The hash-fragment form (#location=) is unreliable because browsers pass
-    # fragment content to JS un-decoded, and + is NOT treated as space there.
-    redfin_url  = f"https://www.redfin.com/search?location={enc}"
+    # Redfin: hash-fragment routing (#location=).
+    # React SPA reads window.location.hash via URLSearchParams, which decodes
+    # '+' as space — quote_plus is correct here. Unit stripped because a bare '#'
+    # inside the hash value terminates the fragment and truncates the address.
+    redfin_url  = f"https://www.redfin.com/search#location={enc_plus}"
 
-    # Realtor.com: slug router — hyphens within parts, underscores between parts.
-    # Unit numbers (#C40, Apt 3, etc.) are stripped because their router ignores
-    # them and a bare # in the path would be mis-parsed as a URL fragment.
-    realtor_url = f"https://www.realtor.com/realestateandforsale/{_realtor_slug(address)}/"
+    # Trulia (owned by Zillow): path-based search, same reliable pattern as Zillow.
+    # Realtor.com replaced because their slug router is brittle and returns 503
+    # for addresses it can't match — Trulia handles %20-encoded addresses cleanly.
+    # Unit stripped for cleaner search results.
+    trulia_url  = f"https://www.trulia.com/homes/{enc_no_unit}/"
 
     maps_url    = f"https://www.google.com/maps/search/{enc}"
 
@@ -731,7 +716,7 @@ def render_quick_links(address: str) -> None:
         c1, c2, c3, c4 = st.columns(4)
         c1.link_button("🏠 Zillow",       zillow_url,  width='stretch')
         c2.link_button("🔴 Redfin",       redfin_url,  width='stretch')
-        c3.link_button("🏡 Realtor.com",  realtor_url, width='stretch')
+        c3.link_button("🟠 Trulia",        trulia_url,  width='stretch')
         c4.link_button("🗺️ Google Maps",  maps_url,    width='stretch')
 
 
