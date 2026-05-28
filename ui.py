@@ -688,36 +688,34 @@ def _strip_unit(address: str) -> str:
 
 
 def render_quick_links(address: str) -> None:
-    """Render external property link buttons (Zillow, Redfin, Trulia, Google Maps)."""
+    """Render external property link buttons (Zillow, Redfin, Realtor, Google Maps)."""
     from urllib.parse import quote, quote_plus
 
     enc          = quote(address, safe="")          # %20 — path segments & Maps
     enc_plus     = quote_plus(_strip_unit(address)) # + encoding, unit stripped — Redfin hash
-    enc_no_unit  = quote(_strip_unit(address), safe="")  # %20, unit stripped — Trulia path
+    enc_no_unit  = quote(_strip_unit(address), safe="")  # %20, unit stripped — Realtor path
 
     # Zillow: path-based search with %20 encoding
-    zillow_url  = f"https://www.zillow.com/homes/{enc}/"
+    zillow_url   = f"https://www.zillow.com/homes/{enc}/"
 
     # Redfin: hash-fragment routing (#location=).
     # React SPA reads window.location.hash via URLSearchParams, which decodes
     # '+' as space — quote_plus is correct here. Unit stripped because a bare '#'
     # inside the hash value terminates the fragment and truncates the address.
-    redfin_url  = f"https://www.redfin.com/search#location={enc_plus}"
+    redfin_url   = f"https://www.redfin.com/search#location={enc_plus}"
 
-    # Trulia (owned by Zillow): path-based search, same reliable pattern as Zillow.
-    # Realtor.com replaced because their slug router is brittle and returns 503
-    # for addresses it can't match — Trulia handles %20-encoded addresses cleanly.
+    # Realtor.com: path-based search with %20 encoding.
     # Unit stripped for cleaner search results.
-    trulia_url  = f"https://www.trulia.com/homes/{enc_no_unit}/"
+    realtor_url  = f"https://www.realtor.com/realestateandforsale/{enc_no_unit}/"
 
-    maps_url    = f"https://www.google.com/maps/search/{enc}"
+    maps_url     = f"https://www.google.com/maps/search/{enc}"
 
     with st.expander("🔗 Property Quick Links", expanded=False):
         c1, c2, c3, c4 = st.columns(4)
-        c1.link_button("🏠 Zillow",       zillow_url,  width='stretch')
-        c2.link_button("🔴 Redfin",       redfin_url,  width='stretch')
-        c3.link_button("🟠 Trulia",        trulia_url,  width='stretch')
-        c4.link_button("🗺️ Google Maps",  maps_url,    width='stretch')
+        c1.link_button("🏠 Zillow",       zillow_url,   width='stretch')
+        c2.link_button("🔴 Redfin",       redfin_url,   width='stretch')
+        c3.link_button("🔑 Realtor",      realtor_url,  width='stretch')
+        c4.link_button("🗺️ Google Maps",  maps_url,     width='stretch')
 
 
 # ── Street View ────────────────────────────────────────────────────────────────
